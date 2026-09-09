@@ -130,6 +130,8 @@ if "step" not in st.session_state:
     st.session_state.step = 0
 if "picked_endpoint" not in st.session_state:
     st.session_state.picked_endpoint = "https://api.census.gov/data/2000/dec/sf1?"
+if "endpoint_selected" not in st.session_state:
+    st.session_state.endpoint_selected = False
 if "sas_connected" not in st.session_state:
     st.session_state.sas_connected = False
 if "sas_status_msg" not in st.session_state:
@@ -158,9 +160,41 @@ def set_step(idx: int):
     st.session_state.step = idx
     st.rerun()
 
+def highest_unlocked_step(
+    sas_connected: bool,
+    step2_result: dict | None,
+    step3_result: dict | None,
+    endpoint_selected: bool,
+    picked_endpoint: str,
+) -> int:
+    def result_succeeded(result: dict | None) -> bool:
+        return (
+            isinstance(result, dict)
+            and isinstance(result.get("res"), dict)
+            and bool(result["res"].get("success"))
+        )
+
+    if not sas_connected:
+        return 0
+    if not result_succeeded(step2_result):
+        return 1
+    if not result_succeeded(step3_result):
+        return 2
+    if not endpoint_selected:
+        return 3
+    return 4
+
+
 # -----------------------------------------------------------------------------
 # Sidebar: Quick Navigation & Session Summary
 # -----------------------------------------------------------------------------
+unlocked_step = highest_unlocked_step(
+    sas_backend.is_connected,
+    st.session_state.step2_result,
+    st.session_state.step3_result,
+    st.session_state.endpoint_selected,
+    st.session_state.picked_endpoint,
+)
 with st.sidebar:
     st.markdown("### 🏛️ Wizard Navigator")
     for i, s in enumerate(STEPS):
@@ -171,8 +205,10 @@ with st.sidebar:
             key=f"nav_btn_{i}",
             use_container_width=True,
             type="primary" if is_active else "secondary",
+            disabled=i > unlocked_step,
         ):
-            set_step(i)
+            if i <= unlocked_step:
+                set_step(i)
 
     st.markdown("---")
     st.markdown("### 🔌 SAS Session Status")
@@ -274,6 +310,8 @@ with card:
                 msg = sas_backend.disconnect()
                 st.session_state.sas_status_msg = f"⚪ {msg}"
                 st.session_state["sas_connected"] = False
+                st.session_state.env_init_msg = ""
+                st.session_state.step = 0
                 st.rerun()
 
         st.markdown("---")
@@ -340,7 +378,8 @@ with card:
             st.caption("💡 *Tip: If running offline without SAS, you can still configure parameters and download SAS scripts in subsequent steps.*")
         with col_next:
             if st.button("Next: Collect Dataset Catalog >", type="primary", use_container_width=True):
-                set_step(1)
+                if unlocked_step >= 1:
+                    set_step(1)
 
     # -------------------------------------------------------------------------
     # STEP 2: Collect All Datasets (%censusapi_getAllDataSets)
@@ -378,6 +417,7 @@ with card:
             if existing_df is not None and not existing_df.empty:
                 st.session_state.step2_result = {
                     "res": {
+                        "success": True,
                         "fetched": True,
                         "log": f"/* Loaded existing dataset {p_outLibName}.{p_outDsName} from active SAS session */",
                         "errors": [],
@@ -449,7 +489,8 @@ with card:
                 set_step(0)
         with col_next:
             if st.button("Next: Dataset Profile >", type="primary", use_container_width=True):
-                set_step(2)
+                if unlocked_step >= 2:
+                    set_step(2)
 
     # -------------------------------------------------------------------------
     # STEP 3: Dataset Profile & Metadata (%censusapi_getDsFullInfo)
@@ -519,7 +560,8 @@ with card:
                 set_step(1)
         with col_next:
             if st.button("Next: Search Catalog >", type="primary", use_container_width=True):
-                set_step(3)
+                if unlocked_step >= 3:
+                    set_step(3)
 
     # -------------------------------------------------------------------------
     # STEP 4: Interactive Census Catalog Quick-Lookup
@@ -571,8 +613,16 @@ with card:
 
             if st.button("📋 Apply Endpoint to Step 5 Query Builder", type="success", use_container_width=False):
                 st.session_state.picked_endpoint = selected_url
+                st.session_state.endpoint_selected = True
                 st.success(f"Applied: {selected_url}")
-                set_step(4)
+                if highest_unlocked_step(
+                    sas_backend.is_connected,
+                    st.session_state.step2_result,
+                    st.session_state.step3_result,
+                    st.session_state.endpoint_selected,
+                    st.session_state.picked_endpoint,
+                ) >= 4:
+                    set_step(4)
         else:
             st.info("No endpoints matching your query. Enter a keyword above (e.g. 'sf1', 'acs5', 'dec') and click **Search Catalog**.")
 
@@ -583,7 +633,8 @@ with card:
                 set_step(2)
         with col_next:
             if st.button("Next: Query Builder >", type="primary", use_container_width=True):
-                set_step(4)
+                if unlocked_step >= 4:
+                    set_step(4)
 
     # -------------------------------------------------------------------------
     # STEP 5: Build & Submit Data API Query (%censusapi_submitDataApiQuery)
