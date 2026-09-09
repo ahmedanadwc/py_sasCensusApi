@@ -39,11 +39,57 @@ def imports():
 
 @app.cell
 def wizard_state(mo):
-    # Wizard step tracking state (0 to 4)
     get_step, set_step = mo.state(0)
-    # Target endpoint passed from Step 4 search
-    get_picked_endpoint, set_picked_endpoint = mo.state("https://api.census.gov/data/2000/dec/sf1?")
-    return get_picked_endpoint, get_step, set_picked_endpoint, set_step
+    get_picked_endpoint, set_picked_endpoint = mo.state(
+        "https://api.census.gov/data/2000/dec/sf1?"
+    )
+    get_endpoint_selected, set_endpoint_selected = mo.state(False)
+    get_step2_result, set_step2_result = mo.state(None)
+    get_step3_result, set_step3_result = mo.state(None)
+    get_step5_result, set_step5_result = mo.state(None)
+    return (
+        get_endpoint_selected,
+        get_picked_endpoint,
+        get_step,
+        get_step2_result,
+        get_step3_result,
+        get_step5_result,
+        set_endpoint_selected,
+        set_picked_endpoint,
+        set_step,
+        set_step2_result,
+        set_step3_result,
+        set_step5_result,
+    )
+
+
+@app.cell
+def wizard_unlocks():
+    def result_succeeded(result):
+        return (
+            isinstance(result, dict)
+            and isinstance(result.get("res"), dict)
+            and bool(result["res"].get("success"))
+        )
+
+    def highest_unlocked_step(
+        sas_connected,
+        step2_result,
+        step3_result,
+        endpoint_selected,
+        picked_endpoint,
+    ):
+        if not sas_connected:
+            return 0
+        if not result_succeeded(step2_result):
+            return 1
+        if not result_succeeded(step3_result):
+            return 2
+        if not endpoint_selected or not picked_endpoint.strip():
+            return 3
+        return 4
+
+    return (highest_unlocked_step,)
 
 
 @app.cell
@@ -83,7 +129,17 @@ def app_header(mo):
 
 
 @app.cell
-def wizard_navigation_bar(get_step, mo, sas_backend):
+def wizard_navigation_bar(
+    get_endpoint_selected,
+    get_picked_endpoint,
+    get_step,
+    get_step2_result,
+    get_step3_result,
+    highest_unlocked_step,
+    mo,
+    sas_backend,
+    set_step,
+):
     # Get the current wizard step index (0 to 4) 
     _nav_step = get_step()
 
@@ -96,14 +152,26 @@ def wizard_navigation_bar(get_step, mo, sas_backend):
         ( "Query", "📊 Query Builder"),
     ]
 
-    # Create the Navigation Buttons for the Wizard Steps
+    highest_step = highest_unlocked_step(
+        sas_backend.is_connected,
+        get_step2_result(),
+        get_step3_result(),
+        get_endpoint_selected(),
+        get_picked_endpoint(),
+    )
     nav_buttons = []
     for idx, (short_label, full_label) in enumerate(steps_meta):
         is_active = (_nav_step == idx)
         label_text = f"▶ {short_label}" if is_active else short_label
+
+        def _go_to_step(_, target=idx):
+            if target <= highest_step:
+                set_step(target)
+
         btn = mo.ui.button(
             label=label_text,
-            disabled=(not sas_backend.is_connected and idx > 0),
+            disabled=idx > highest_step,
+            on_click=_go_to_step,
         )
         nav_buttons.append(btn)
 
@@ -300,6 +368,8 @@ def step2_view(
     DEFAULT_OUT_LIB,
     mo,
     sas_backend,
+    get_step2_result,
+    set_step2_result,
     set_step,
     step2_form,
 ):
@@ -326,12 +396,33 @@ def step2_view(
     out_tbl = step2_vals["p_outDsName"]
     out_lib = step2_vals["p_outLibName"]
 
-    if step2_form.value is not None:
+    _step2_existing_result = get_step2_result()
+    _step2_submitted_values = step2_vals if step2_form.value is not None else None
+
+    if (
+        step2_form.value is not None
+        and (
+            _step2_existing_result is None
+            or _step2_existing_result.get("submitted_values") != _step2_submitted_values
+        )
+    ):
         # --- Form was submitted: run the macro in SAS ---
         if not sas_backend.is_connected:
             step2_exec_status = mo.md("⚠️ **SAS is not connected.** Return to Step 1 and connect via SASPy first.")
         else:
             step2_res = sas_backend.submit_code(sas_code_step2)
+            step2_df = (
+                sas_backend.fetch_dataframe(out_tbl, out_lib)
+                if step2_res["success"]
+                else None
+            )
+            set_step2_result({
+                "res": step2_res,
+                "df": step2_df,
+                "lib": out_lib,
+                "ds": out_tbl,
+                "submitted_values": _step2_submitted_values,
+            })
             if step2_res["success"]:
                 step2_exec_status = mo.md("✅ **Step 2 Macro executed successfully!** (0 SAS errors)")
             else:
@@ -345,17 +436,31 @@ def step2_view(
                 )
             })
 
-            step2_df = sas_backend.fetch_dataframe(out_tbl, out_lib)
             if step2_df is not None and not step2_df.empty:
                 step2_table_view = mo.vstack([
                     mo.md(f"#### 📊 Dataset Preview: `{out_lib}.{out_tbl}` ({len(step2_df)} rows, {len(step2_df.columns)} columns)"),
                     mo.ui.table(step2_df, pagination=True),
                 ])
 
-    elif sas_backend.is_connected:
+    elif (
+        step2_form.value is None
+        and _step2_existing_result is None
+        and sas_backend.is_connected
+    ):
         # --- Auto-fetch: form not submitted, but dataset may already exist in SAS ---
         existing_df = sas_backend.fetch_dataframe(out_tbl, out_lib)
         if existing_df is not None and not existing_df.empty:
+            set_step2_result({
+                "res": {
+                    "success": True,
+                    "fetched": True,
+                    "log": f"/* Loaded existing dataset {out_lib}.{out_tbl} from active SAS session */",
+                    "errors": [],
+                },
+                "df": existing_df,
+                "lib": out_lib,
+                "ds": out_tbl,
+            })
             step2_exec_status = mo.md("✅ **Step 2: Fetched existing SAS data set** — no macro execution needed.")
             step2_log_display = mo.accordion({
                 "📋 SAS Log (auto-fetch)": mo.ui.code_editor(
@@ -369,8 +474,47 @@ def step2_view(
                 mo.ui.table(existing_df, pagination=True),
             ])
 
+    if _step2_existing_result is not None and step2_exec_status is None:
+        _step2_result_value = _step2_existing_result["res"]
+        step2_exec_status = mo.md(
+            "✅ **Step 2: Fetched existing SAS data set** — no macro execution needed."
+            if _step2_result_value.get("fetched")
+            else (
+                "✅ **Step 2 Macro executed successfully!** (0 SAS errors)"
+                if _step2_result_value.get("success")
+                else f"❌ **Macro finished with errors** ({len(_step2_result_value.get('errors', []))} error lines found)"
+            )
+        )
+        step2_log_display = mo.accordion({
+            f"📋 SAS Log ({len(_step2_result_value.get('log', '').splitlines())} lines)": mo.ui.code_editor(
+                value=_step2_result_value.get("log", ""),
+                language="sql",
+                disabled=True,
+            )
+        })
+        _step2_result_df = _step2_existing_result.get("df")
+        if _step2_result_df is not None and not _step2_result_df.empty:
+            step2_table_view = mo.vstack([
+                mo.md(f"#### 📊 Dataset Preview: `{_step2_existing_result['lib']}.{_step2_existing_result['ds']}` ({len(_step2_result_df)} rows, {len(_step2_result_df.columns)} columns)"),
+                mo.ui.table(_step2_result_df, pagination=True),
+            ])
+
     btn_back_step2 = mo.ui.button(label="< Back: SAS Connection", on_click=lambda _: set_step(0))
-    btn_next_step2 = mo.ui.button(label="Next: Dataset Profile >", kind="warn", on_click=lambda _: set_step(2))
+
+    def _go_to_step_three(_):
+        _step2_next_result = get_step2_result()
+        if _step2_next_result and _step2_next_result.get("res", {}).get("success"):
+            set_step(2)
+
+    btn_next_step2 = mo.ui.button(
+        label="Next: Dataset Profile >",
+        kind="warn",
+        on_click=_go_to_step_three,
+        disabled=not bool(
+            get_step2_result()
+            and get_step2_result().get("res", {}).get("success")
+        ),
+    )
 
     step2_card = mo.vstack([
         mo.md(
@@ -430,6 +574,8 @@ def step3_view(
     DEFAULT_OUT_LIB,
     mo,
     sas_backend,
+    get_step3_result,
+    set_step3_result,
     set_step,
     step3_form,
 ):
@@ -452,11 +598,24 @@ def step3_view(
     step3_exec_status = None
     step3_log_display = None
 
-    if step3_form.value is not None:
+    _step3_existing_result = get_step3_result()
+    _step3_submitted_values = step3_vals if step3_form.value is not None else None
+
+    if (
+        step3_form.value is not None
+        and (
+            _step3_existing_result is None
+            or _step3_existing_result.get("submitted_values") != _step3_submitted_values
+        )
+    ):
         if not sas_backend.is_connected:
             step3_exec_status = mo.md("⚠️ **SAS is not connected.** Return to Step 1 and connect via SASPy first.")
         else:
             step3_res = sas_backend.submit_code(sas_code_step3)
+            set_step3_result({
+                "res": step3_res,
+                "submitted_values": _step3_submitted_values,
+            })
             if step3_res["success"]:
                 step3_exec_status = mo.md("✅ **Step 3 Profile executed successfully!** (0 SAS errors)")
             else:
@@ -470,8 +629,37 @@ def step3_view(
                 )
             })
 
+    if _step3_existing_result is not None and step3_exec_status is None:
+        _step3_result_value = _step3_existing_result["res"]
+        step3_exec_status = mo.md(
+            "✅ **Step 3 Profile executed successfully!** (0 SAS errors)"
+            if _step3_result_value.get("success")
+            else f"❌ **Execution finished with errors** ({len(_step3_result_value.get('errors', []))} error lines found)"
+        )
+        step3_log_display = mo.accordion({
+            f"📋 SAS Log ({len(_step3_result_value.get('log', '').splitlines())} lines)": mo.ui.code_editor(
+                value=_step3_result_value.get("log", ""),
+                language="sql",
+                disabled=True,
+            )
+        })
+
     btn_back_step3 = mo.ui.button(label="< Back: Collect Datasets", on_click=lambda _: set_step(1))
-    btn_next_step3 = mo.ui.button(label="Next: Search Catalog >", kind="warn", on_click=lambda _: set_step(3))
+
+    def _go_to_step_four(_):
+        _step3_next_result = get_step3_result()
+        if _step3_next_result and _step3_next_result.get("res", {}).get("success"):
+            set_step(3)
+
+    btn_next_step3 = mo.ui.button(
+        label="Next: Search Catalog >",
+        kind="warn",
+        on_click=_go_to_step_four,
+        disabled=not bool(
+            get_step3_result()
+            and get_step3_result().get("res", {}).get("success")
+        ),
+    )
 
     step3_card = mo.vstack([
         mo.md(
@@ -550,26 +738,49 @@ def step4_search_results(
 def step4_view(
     btn_do_search,
     endpoint_options,
+    get_endpoint_selected,
+    get_step3_result,
     mo,
     search_query_input,
     selected_endpoint_picker,
+    set_endpoint_selected,
     set_picked_endpoint,
     set_step,
     year_select,
 ):
     # Picked endpoint display & transfer button
     active_ep = selected_endpoint_picker.value or "https://api.census.gov/data/2000/dec/sf1?"
+    has_results = len(endpoint_options) > 0
+
+    def _apply_endpoint(_):
+        if active_ep:
+            set_picked_endpoint(active_ep)
+            set_endpoint_selected(True)
+            set_step(4)
 
     btn_apply_endpoint = mo.ui.button(
         label="📋 Apply Endpoint to Step 5 Query Builder",
         kind="success",
-        on_click=lambda _: (set_picked_endpoint(active_ep), set_step(4)),
+        on_click=_apply_endpoint,
+        disabled=not has_results,
     )
 
     btn_back_step4 = mo.ui.button(label="< Back: Dataset Profile", on_click=lambda _: set_step(2))
-    btn_next_step4 = mo.ui.button(label="Next: Query Builder >", kind="warn", on_click=lambda _: set_step(4))
+    def _go_to_step_five(_):
+        if get_endpoint_selected() and get_step3_result():
+            set_step(4)
 
-    has_results = len(endpoint_options) > 0
+    btn_next_step4 = mo.ui.button(
+        label="Next: Query Builder >",
+        kind="warn",
+        on_click=_go_to_step_five,
+        disabled=not (
+            get_endpoint_selected()
+            and get_step3_result()
+            and get_step3_result().get("res", {}).get("success")
+        ),
+    )
+
     endpoint_display = selected_endpoint_picker if has_results else mo.md("_Enter a query and click **Search Catalog** to view endpoints._")
 
     step4_card = mo.vstack([
@@ -646,8 +857,10 @@ def form_step5_query(DEFAULT_MAX_VAR_COUNT, get_picked_endpoint, mo):
 def step5_view(
     DEFAULT_MAX_VAR_COUNT,
     get_picked_endpoint,
+    get_step5_result,
     mo,
     sas_backend,
+    set_step5_result,
     set_step,
     step5_form,
 ):
@@ -682,7 +895,15 @@ def step5_view(
         step5_log_display = None
         step5_table_view = None
 
-        if step5_form.value is not None:
+        existing_result = get_step5_result()
+        submitted_values = step5_vals if step5_form.value is not None else None
+        if (
+            step5_form.value is not None
+            and (
+                existing_result is None
+                or existing_result.get("submitted_values") != submitted_values
+            )
+        ):
             if not sas_backend.is_connected:
                 step5_exec_status = mo.md("⚠️ **SAS is not connected.** Return to Step 1 and connect via SASPy first.")
             else:
@@ -704,6 +925,12 @@ def step5_view(
                 libref = parts[0] if len(parts) > 1 else "WORK"
                 tbl = parts[1] if len(parts) > 1 else parts[0]
                 step5_df = sas_backend.fetch_dataframe(tbl, libref)
+                set_step5_result({
+                    "res": step5_res,
+                    "df": step5_df,
+                    "ds_name": out_ds_name_step5,
+                    "submitted_values": submitted_values,
+                })
                 if step5_df is not None and not step5_df.empty:
                     step5_table_view = mo.vstack([
                         mo.md(f"#### 📊 SAS Dataset Table: `{out_ds_name_step5}` ({len(step5_df)} rows, {len(step5_df.columns)} columns)"),
@@ -712,8 +939,32 @@ def step5_view(
                 elif step5_df is not None and step5_df.empty:
                     step5_table_view = mo.md(f"ℹ️ Output table `{out_ds_name_step5}` exists but is empty.")
 
+        if existing_result is not None and step5_exec_status is None:
+            _step5_result_value = existing_result["res"]
+            step5_exec_status = mo.md(
+                "✅ **Step 5 Query executed successfully!** (0 SAS errors)"
+                if _step5_result_value.get("success")
+                else f"❌ **Query finished with errors** ({len(_step5_result_value.get('errors', []))} error lines found)"
+            )
+            step5_log_display = mo.accordion({
+                f"📋 SAS Log ({len(_step5_result_value.get('log', '').splitlines())} lines)": mo.ui.code_editor(
+                    value=_step5_result_value.get("log", ""),
+                    language="sql",
+                    disabled=True,
+                )
+            })
+            _step5_result_df = existing_result.get("df")
+            if _step5_result_df is not None and not _step5_result_df.empty:
+                step5_table_view = mo.vstack([
+                    mo.md(f"#### 📊 SAS Dataset Table: `{existing_result['ds_name']}` ({len(_step5_result_df)} rows, {len(_step5_result_df.columns)} columns)"),
+                    mo.ui.table(_step5_result_df, pagination=True),
+                ])
+            elif _step5_result_df is not None and _step5_result_df.empty:
+                step5_table_view = mo.md(
+                    f"ℹ️ Output table `{existing_result['ds_name']}` exists but is empty."
+                )
+
         btn_back_step5 = mo.ui.button(label="< Back: Search Endpoints", on_click=lambda _: set_step(3))
-        btn_next_step5 = mo.ui.button(label="Next: SAS Execution & Results >", kind="warn", on_click=lambda _: set_step(5))
 
         step5_card = mo.vstack([
             mo.md(
@@ -737,19 +988,24 @@ def step5_view(
                 ),
             ]),
             mo.md("---"),
-            mo.hstack([btn_back_step5, btn_next_step5], justify="space-between"),
+            mo.hstack([btn_back_step5], justify="start"),
         ])
-        return
+        return step5_card
 
 
-    _()
-    return
+    step5_card = _()
+    return (step5_card,)
 
 
 @app.cell
 def wizard_orchestrator(
+    get_endpoint_selected,
+    get_picked_endpoint,
     get_step,
+    get_step2_result,
+    get_step3_result,
     header_html,
+    highest_unlocked_step,
     mo,
     nav_buttons,
     sas_backend,
@@ -757,23 +1013,40 @@ def wizard_orchestrator(
     step2_card,
     step3_card,
     step4_card,
+    step5_card,
     step_nav_view,
 ):
     current_step = get_step()
-    if sas_backend.is_connected:
+    _orchestrator_highest_step = highest_unlocked_step(
+        sas_backend.is_connected,
+        get_step2_result(),
+        get_step3_result(),
+        get_endpoint_selected(),
+        get_picked_endpoint(),
+    )
+    if not sas_backend.is_connected:
+        current_step = 0
+        steps_content = [
+            step1_card,
+            mo.md("⚠️ Connect to SAS to continue to the next wizard steps."),
+        ]
+    elif current_step > _orchestrator_highest_step:
+        current_step = _orchestrator_highest_step
         steps_content = [
             step1_card,
             step2_card,
             step3_card,
             step4_card,
-            #step5_card,
+            step5_card,
         ]
     else:
         steps_content = [
             step1_card,
-            mo.md("⚠️ Connect to SAS to continue to the next wizard steps."),
+            step2_card,
+            step3_card,
+            step4_card,
+            step5_card,
         ]
-        current_step = 0
 
     wizard_window = mo.vstack([
         header_html,

@@ -10,8 +10,8 @@ def source() -> str:
 
 def test_navigation_cell_receives_connection_state_and_disables_later_steps():
     text = source()
-    assert "def wizard_navigation_bar(get_step, mo, sas_backend):" in text
-    assert "disabled=(not sas_backend.is_connected and idx > 0)" in text
+    assert "def wizard_navigation_bar(" in text
+    assert "disabled=idx > highest_step" in text
 
 
 def test_step_one_forward_callback_requires_connection():
