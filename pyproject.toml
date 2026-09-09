@@ -1,0 +1,23 @@
+[project]
+name = "py-sascensusapi"
+version = "0.1.0"
+description = "Marimo reactive notebook and SASPy bridge for sasCensusApi macros"
+readme = "README.md"
+authors = [
+    { name = "ahmedanadwc", email = "anawarehousing@google.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "marimo>=0.24.0",
+    "saspy>=5.100.0",
+    "httpx>=0.28.0",
+    "pandas>=2.2.0",
+    "pydantic>=2.10.0"
+]
+
+[project.scripts]
+py-sascensusapi = "py_sascensusapi.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.7,<0.13.0"]
+build-backend = "uv_build"
