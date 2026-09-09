@@ -130,6 +130,8 @@ if "step" not in st.session_state:
     st.session_state.step = 0
 if "picked_endpoint" not in st.session_state:
     st.session_state.picked_endpoint = "https://api.census.gov/data/2000/dec/sf1?"
+if "endpoint_selected" not in st.session_state:
+    st.session_state.endpoint_selected = False
 if "sas_connected" not in st.session_state:
     st.session_state.sas_connected = False
 if "sas_status_msg" not in st.session_state:
@@ -162,6 +164,7 @@ def highest_unlocked_step(
     sas_connected: bool,
     step2_result: dict | None,
     step3_result: dict | None,
+    endpoint_selected: bool,
     picked_endpoint: str,
 ) -> int:
     if not sas_connected:
@@ -170,7 +173,7 @@ def highest_unlocked_step(
         return 1
     if step3_result is None:
         return 2
-    if not picked_endpoint.strip():
+    if not endpoint_selected:
         return 3
     return 4
 
@@ -182,6 +185,7 @@ unlocked_step = highest_unlocked_step(
     sas_backend.is_connected,
     st.session_state.step2_result,
     st.session_state.step3_result,
+    st.session_state.endpoint_selected,
     st.session_state.picked_endpoint,
 )
 with st.sidebar:
@@ -601,11 +605,13 @@ with card:
 
             if st.button("📋 Apply Endpoint to Step 5 Query Builder", type="success", use_container_width=False):
                 st.session_state.picked_endpoint = selected_url
+                st.session_state.endpoint_selected = True
                 st.success(f"Applied: {selected_url}")
                 if highest_unlocked_step(
                     sas_backend.is_connected,
                     st.session_state.step2_result,
                     st.session_state.step3_result,
+                    st.session_state.endpoint_selected,
                     st.session_state.picked_endpoint,
                 ) >= 4:
                     set_step(4)
