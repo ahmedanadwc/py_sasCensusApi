@@ -50,19 +50,53 @@ def test_connection_unlocks_dataset_catalog_step():
 
 def test_step2_result_unlocks_dataset_profile_step():
     highest_unlocked_step = _load_highest_unlocked_step()
-    assert highest_unlocked_step(True, {}, None, False, "") == 2
+    assert highest_unlocked_step(True, {"res": {"success": True}}, None, False, "") == 2
+
+
+def test_failed_step2_result_does_not_unlock_dataset_profile_step():
+    highest_unlocked_step = _load_highest_unlocked_step()
+    assert highest_unlocked_step(True, {"res": {"success": False}}, None, False, "") == 1
 
 
 def test_step3_result_unlocks_catalog_search_step():
     highest_unlocked_step = _load_highest_unlocked_step()
-    assert highest_unlocked_step(True, {}, {}, False, " https://api.example.test ") == 3
+    assert highest_unlocked_step(
+        True,
+        {"res": {"success": True}},
+        {"res": {"success": True}},
+        False,
+        " https://api.example.test ",
+    ) == 3
+
+
+def test_failed_step3_result_does_not_unlock_catalog_search_step():
+    highest_unlocked_step = _load_highest_unlocked_step()
+    assert highest_unlocked_step(
+        True,
+        {"res": {"success": True}},
+        {"res": {"success": False}},
+        False,
+        " https://api.example.test ",
+    ) == 2
 
 
 def test_endpoint_unlocks_query_builder_step():
     highest_unlocked_step = _load_highest_unlocked_step()
-    assert highest_unlocked_step(True, {}, {}, True, " https://api.example.test ") == 4
+    assert highest_unlocked_step(
+        True,
+        {"res": {"success": True}},
+        {"res": {"success": True}},
+        True,
+        " https://api.example.test ",
+    ) == 4
 
 
 def test_disconnect_relocks_wizard_even_with_previous_results():
     highest_unlocked_step = _load_highest_unlocked_step()
-    assert highest_unlocked_step(False, {}, {}, True, "https://api.example.test") == 0
+    assert highest_unlocked_step(
+        False,
+        {"res": {"success": True}},
+        {"res": {"success": True}},
+        True,
+        "https://api.example.test",
+    ) == 0

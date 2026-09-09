@@ -167,11 +167,18 @@ def highest_unlocked_step(
     endpoint_selected: bool,
     picked_endpoint: str,
 ) -> int:
+    def result_succeeded(result: dict | None) -> bool:
+        return (
+            isinstance(result, dict)
+            and isinstance(result.get("res"), dict)
+            and bool(result["res"].get("success"))
+        )
+
     if not sas_connected:
         return 0
-    if step2_result is None:
+    if not result_succeeded(step2_result):
         return 1
-    if step3_result is None:
+    if not result_succeeded(step3_result):
         return 2
     if not endpoint_selected:
         return 3
@@ -410,6 +417,7 @@ with card:
             if existing_df is not None and not existing_df.empty:
                 st.session_state.step2_result = {
                     "res": {
+                        "success": True,
                         "fetched": True,
                         "log": f"/* Loaded existing dataset {p_outLibName}.{p_outDsName} from active SAS session */",
                         "errors": [],
