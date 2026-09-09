@@ -83,7 +83,7 @@ def app_header(mo):
 
 
 @app.cell
-def wizard_navigation_bar(get_step, mo):
+def wizard_navigation_bar(get_step, mo, sas_backend):
     # Get the current wizard step index (0 to 4) 
     _nav_step = get_step()
 
@@ -103,7 +103,7 @@ def wizard_navigation_bar(get_step, mo):
         label_text = f"▶ {short_label}" if is_active else short_label
         btn = mo.ui.button(
             label=label_text,
-            disabled=True,
+            disabled=(not sas_backend.is_connected and idx > 0),
         )
         nav_buttons.append(btn)
 
@@ -211,14 +211,22 @@ def step1_view(
         else:
             init_msg = "⚠️ Connect to SAS first before initializing the macro environment."
 
+    def _go_to_step_two(_):
+        if sas_backend.is_connected:
+            set_step(1)
+
     btn_next_step1 = mo.ui.button(
         label="Next: Collect Dataset Catalog >",
         kind="warn",
-        on_click=lambda _: set_step(1),
+        on_click=_go_to_step_two,
+        disabled=not sas_backend.is_connected,
     )
 
-    # Compopse the Step 1 card with connection, environment setup, and navigation
-    step1_card = mo.vstack([
+    # Compose the Step 1 card with connection, environment setup, and navigation
+    # -------------------------------------------------------------------------
+    # Build the card items list; environment params only appear when connected
+    # -------------------------------------------------------------------------
+    card_items = [
         mo.md(
             f"""
             ### 🔌 Step 1: SASPy Connection & Environment Setup
@@ -229,18 +237,28 @@ def step1_view(
         ),
         mo.hstack([cfg_select, btn_connect, btn_disconnect]),
         cfgfile_input,
-        mo.md("---"),
-        mo.md("#### Session Environment Parameters"),
-        proj_path_input,
-        api_key_input,
-        mo.hstack([btn_init_env]),
-        mo.md(f"**{init_msg}**") if init_msg else mo.md(""),
+    ]
+
+    # --- Conditional UI guard: only show env params when SAS is connected ---
+    if sas_backend.is_connected:
+        card_items += [
+            mo.md("---"),
+            mo.md("#### ⚙️ Session Environment Parameters"),
+            proj_path_input,
+            api_key_input,
+            mo.hstack([btn_init_env]),
+            mo.md(f"**{init_msg}**") if init_msg else mo.md(""),
+        ]
+
+    card_items += [
         mo.md("---"),
         mo.hstack([
             mo.md("💡 *Tip: If running offline without SAS, you can still configure parameters and download SAS scripts.*"),
             btn_next_step1,
         ], justify="space-between"),
-    ])
+    ]
+
+    step1_card = mo.vstack(card_items)
     return (step1_card,)
 
 
@@ -305,7 +323,11 @@ def step2_view(
     step2_log_display = None
     step2_table_view = None
 
+    out_tbl = step2_vals["p_outDsName"]
+    out_lib = step2_vals["p_outLibName"]
+
     if step2_form.value is not None:
+        # --- Form was submitted: run the macro in SAS ---
         if not sas_backend.is_connected:
             step2_exec_status = mo.md("⚠️ **SAS is not connected.** Return to Step 1 and connect via SASPy first.")
         else:
@@ -323,14 +345,29 @@ def step2_view(
                 )
             })
 
-            out_tbl = step2_vals["p_outDsName"]
-            out_lib = step2_vals["p_outLibName"]
             step2_df = sas_backend.fetch_dataframe(out_tbl, out_lib)
             if step2_df is not None and not step2_df.empty:
                 step2_table_view = mo.vstack([
                     mo.md(f"#### 📊 Dataset Preview: `{out_lib}.{out_tbl}` ({len(step2_df)} rows, {len(step2_df.columns)} columns)"),
                     mo.ui.table(step2_df, pagination=True),
                 ])
+
+    elif sas_backend.is_connected:
+        # --- Auto-fetch: form not submitted, but dataset may already exist in SAS ---
+        existing_df = sas_backend.fetch_dataframe(out_tbl, out_lib)
+        if existing_df is not None and not existing_df.empty:
+            step2_exec_status = mo.md("✅ **Step 2: Fetched existing SAS data set** — no macro execution needed.")
+            step2_log_display = mo.accordion({
+                "📋 SAS Log (auto-fetch)": mo.ui.code_editor(
+                    value=f"/* Loaded existing dataset {out_lib}.{out_tbl} from active SAS session */",
+                    language="sql",
+                    disabled=True,
+                )
+            })
+            step2_table_view = mo.vstack([
+                mo.md(f"#### 📊 Dataset Preview: `{out_lib}.{out_tbl}` ({len(existing_df)} rows, {len(existing_df.columns)} columns)"),
+                mo.ui.table(existing_df, pagination=True),
+            ])
 
     btn_back_step2 = mo.ui.button(label="< Back: SAS Connection", on_click=lambda _: set_step(0))
     btn_next_step2 = mo.ui.button(label="Next: Dataset Profile >", kind="warn", on_click=lambda _: set_step(2))
@@ -715,6 +752,7 @@ def wizard_orchestrator(
     header_html,
     mo,
     nav_buttons,
+    sas_backend,
     step1_card,
     step2_card,
     step3_card,
@@ -722,13 +760,20 @@ def wizard_orchestrator(
     step_nav_view,
 ):
     current_step = get_step()
-    steps_content = [
-        step1_card,
-        step2_card,
-        step3_card,
-        step4_card,
-        #step5_card,
-    ]
+    if sas_backend.is_connected:
+        steps_content = [
+            step1_card,
+            step2_card,
+            step3_card,
+            step4_card,
+            #step5_card,
+        ]
+    else:
+        steps_content = [
+            step1_card,
+            mo.md("⚠️ Connect to SAS to continue to the next wizard steps."),
+        ]
+        current_step = 0
 
     wizard_window = mo.vstack([
         header_html,
