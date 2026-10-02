@@ -4,6 +4,7 @@ import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+import duckdb
 import pandas as pd
 
 from py_sascensusapi.config import (
@@ -16,6 +17,25 @@ from py_sascensusapi.config import (
 logger = logging.getLogger(__name__)
 
 DF_CACHE_DIR = Path.home() / ".cache" / "py_sascensusapi" / "dataframes"
+
+
+def _read_parquet(path: Path) -> pd.DataFrame:
+    """Read a parquet file into a DataFrame using DuckDB."""
+    with duckdb.connect() as con:
+        return con.execute("SELECT * FROM read_parquet(?)", [str(path)]).df()
+
+
+def _write_parquet(df: pd.DataFrame, path: Path) -> None:
+    """Write a DataFrame to parquet using DuckDB (temp file, then atomic replace)."""
+    tmp = path.with_suffix(".tmp")
+    target = str(tmp).replace("'", "''")
+    try:
+        with duckdb.connect() as con:
+            con.register("cache_df", df)
+            con.execute(f"COPY cache_df TO '{target}' (FORMAT parquet)")
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 class SASBackend:
     """Manages the SASPy session and macro executions."""
@@ -188,7 +208,7 @@ options fmtsearch=(WORK apilib);
             parquet = DF_CACHE_DIR / f"{key}.parquet"
             if parquet.exists():
                 try:
-                    df = pd.read_parquet(parquet)
+                    df = _read_parquet(parquet)
                     self._df_cache[key] = df
                     return df.copy()
                 except Exception as exc:
@@ -205,7 +225,7 @@ options fmtsearch=(WORK apilib);
             self._df_cache[key] = df
             try:
                 DF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-                df.to_parquet(DF_CACHE_DIR / f"{key}.parquet")
+                _write_parquet(df, DF_CACHE_DIR / f"{key}.parquet")
             except Exception as exc:
                 logger.info("Parquet cache write skipped for %s.%s: %s", libref, table_name, exc)
         return df.copy() if df is not None else None
