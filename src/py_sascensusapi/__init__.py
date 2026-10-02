@@ -1,4 +1,4 @@
-"""py_sascensusapi - Marimo parameter forms and SASPy bridge for sasCensusApi."""
+"""py_sascensusapi - Streamlit app and SASPy bridge for sasCensusApi."""
 
 from py_sascensusapi.cli import main
 

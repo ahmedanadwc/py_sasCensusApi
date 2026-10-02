@@ -1,5 +1,4 @@
 import argparse
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -7,19 +6,13 @@ from pathlib import Path
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="py-sascensusapi",
-        description="Launch Marimo Studio for SAS Census API",
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["edit", "run"],
-        default="edit",
-        help="Launch in interactive 'edit' mode or web application 'run' mode (default: edit)",
+        description="Launch Streamlit app for SAS Census API",
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=2718,
-        help="Port to serve Marimo on (default: 2718)",
+        default=8501,
+        help="Port to serve Streamlit on (default: 8501)",
     )
     parser.add_argument(
         "--host",
@@ -30,21 +23,21 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    app_path = Path(__file__).parent / "app.py"
+    app_path = Path(__file__).parent / "streamlit_app.py"
 
     cmd = [
         sys.executable,
         "-m",
-        "marimo",
-        args.mode,
+        "streamlit",
+        "run",
         str(app_path),
-        "--port",
+        "--server.port",
         str(args.port),
-        "--host",
+        "--server.address",
         args.host,
     ]
 
-    print(f"Starting Marimo in '{args.mode}' mode...")
+    print("Starting Streamlit...")
     print(f"File: {app_path}")
     print(f"Serving at: http://{args.host}:{args.port}")
     try:
