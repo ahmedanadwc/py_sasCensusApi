@@ -1,4 +1,6 @@
-import os
+from __future__ import annotations
+
+import re
 import sys
 from pathlib import Path
 
@@ -9,7 +11,7 @@ if str(SRC_DIR) not in sys.path and SRC_DIR.exists():
 
 import streamlit as st
 import pandas as pd
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 
 from py_sascensusapi.config import (
     SAS_PROJECT_ROOT,
@@ -156,10 +158,17 @@ STEPS = [
     {"short": "Query", "full": "📊 Query Builder", "desc": "Chunked Census Data API Query"},
 ]
 
+# ------------------------------------ Utility Functions ------------------------------------
+# ------------------------------------------
+# Define a function to set the current step
+# ------------------------------------------
 def set_step(idx: int):
     st.session_state.step = idx
     st.rerun()
 
+# ------------------------------------------------------------------------------------------------------
+# Define a function to determine the highest unlocked step based on SAS connection and previous results
+# ------------------------------------------------------------------------------------------------------
 def highest_unlocked_step(
     sas_connected: bool,
     step2_result: dict | None,
@@ -184,6 +193,175 @@ def highest_unlocked_step(
         return 3
     return 4
 
+# -----------------------------------------------------------------------------------
+# Define a function to extract SAS_config_names from a specified configuration file
+# -----------------------------------------------------------------------------------
+def extract_sas_config_names(config_path: str) -> list[str]:
+    """Extract SAS_config_names from a SASPy configuration file.
+    The configuration file is parsed without executing it.
+    """
+    import ast
+
+    path = Path(config_path)
+
+    if not path.is_file():
+        raise FileNotFoundError(f"Configuration file not found: {path}")
+
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(path))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            is_target = any(
+                isinstance(target, ast.Name)
+                and target.id == "SAS_config_names"
+                for target in node.targets
+            )
+
+            if not is_target:
+                continue
+
+            try:
+                value = ast.literal_eval(node.value)
+            except (ValueError, SyntaxError) as exc:
+                raise ValueError(
+                    "SAS_config_names must contain a literal list or tuple."
+                ) from exc
+
+            if not isinstance(value, (list, tuple)):
+                raise TypeError(
+                    "SAS_config_names must be defined as a list or tuple."
+                )
+
+            if not all(isinstance(name, str) for name in value):
+                raise TypeError(
+                    "Every item in SAS_config_names must be a string."
+                )
+
+            return list(value)
+
+    raise KeyError(
+        f"SAS_config_names was not found in configuration file: {path}"
+    )
+
+#------------------------------------------------------------------------------------
+# Define a helper function to normalize a selected row from AgGrid into a dictionary
+#------------------------------------------------------------------------------------
+def normalize_selected_row(selected_rows) -> dict | None:
+    """Return the first selected AgGrid row as a dictionary."""
+    if selected_rows is None:
+        return None
+
+    if isinstance(selected_rows, pd.DataFrame):
+        if selected_rows.empty:
+            return None
+        return selected_rows.iloc[0].to_dict()
+
+    if isinstance(selected_rows, list):
+        return selected_rows[0] if selected_rows else None
+
+    if isinstance(selected_rows, dict):
+        return selected_rows
+
+    return None
+
+#--------------------------------------------------------------------------------------------------
+# Define a function to find the index of a row in a DataFrame based on a normalized row dictionary
+#--------------------------------------------------------------------------------------------------
+def find_row_index(
+    data: pd.DataFrame,
+    normalized_row: dict | None,
+    key_column: str = "_ROWID_",
+) -> int | None:
+    """Find the positional DataFrame row index matching a selected row."""
+    if not normalized_row or key_column not in data.columns:
+        return None
+
+    selected_key = normalized_row.get(key_column)
+    matches = data.index[data[key_column].eq(selected_key)]
+
+    if len(matches) == 0:
+        return None
+
+    return data.index.get_loc(matches[0])
+
+#--------------------------------------------------------------------------------------------------
+# Step 3 result tables created by %censusapi_getDsFullInfo in APILIB.
+# Names look like <libref>_<ds_unique_id>_<suffix>, e.g. APILIB._45_CPS_1995_VARS
+#--------------------------------------------------------------------------------------------------
+STEP3_LIBREF = "APILIB"
+STEP3_TABS = [
+    ("Variables", "_VARS"),
+    ("Groups", "_GRPS"),
+    ("Geographies", "_GEOS"),
+    ("Sample Queries", "_EXMPLS"),
+]
+
+#--------------------------------------------------------------------------------------------------
+# Define a function to find the Step 3 table names for a dataset row id
+#--------------------------------------------------------------------------------------------------
+def find_step3_tables(ds_unique_id: str) -> dict[str, str]:
+    """Map each tab label to its APILIB table name by scanning SASHELP.VTABLE.
+
+    A table matches when its name ends with <ds_unique_id><suffix>, with the
+    ds_unique_id sanitized the way SAS builds member names (non-word chars -> "_").
+    """
+    uid = re.sub(r"\W", "_", str(ds_unique_id).strip()).upper()
+    if not uid:
+        return {}
+    members = sas_backend.fetch_dataframe(
+        "VTABLE", "SASHELP", ds_opts={"WHERE": f"(libname='{STEP3_LIBREF}')"}
+    )
+    if members is None or members.empty:
+        return {}
+    memname_col = next((c for c in members.columns if c.lower() == "memname"), None)
+    if memname_col is None:
+        return {}
+    names = [str(n).strip() for n in members[memname_col]]
+    found = {}
+    for label, suffix in STEP3_TABS:
+        for name in names:
+            if name.upper().endswith(f"{uid}{suffix}"):
+                found[label] = name
+                break
+    return found
+
+#--------------------------------------------------------------------------------------------------
+# Define a function to display a DataFrame in a read-only AgGrid
+#--------------------------------------------------------------------------------------------------
+def render_grid(df: pd.DataFrame, key: str, height: int = 450) -> None:
+    """Show a DataFrame in an AgGrid sized to its cell contents."""
+    gb = GridOptionsBuilder.from_dataframe(df)
+    gb.configure_default_column(filter=True, sortable=True, resizable=True)
+    auto_size_columns = JsCode(
+        """
+        function(params) {
+            const columnIds = [];
+            params.api.getAllGridColumns().forEach(column => {
+                columnIds.push(column.getColId());
+            });
+            params.api.autoSizeColumns(columnIds, false);
+        }
+        """
+    )
+    grid_options = gb.build()
+    grid_options["autoSizeStrategy"] = {"type": "fitCellContents"}
+    grid_options["suppressColumnVirtualisation"] = True
+    grid_options["onGridReady"] = auto_size_columns
+    grid_options["firstDataRendered"] = auto_size_columns
+    # Grids in inactive tabs are hidden (zero width) when they first render, so the
+    # initial autosize measures nothing; re-run it when the grid becomes visible.
+    grid_options["onGridSizeChanged"] = auto_size_columns
+    AgGrid(
+        df,
+        gridOptions=grid_options,
+        height=height,
+        fit_columns_on_grid_load=False,
+        allow_unsafe_jscode=True,
+        key=key,
+    )
+
+# ------------------------------------ End Utility Functions ------------------------------------
 
 # -----------------------------------------------------------------------------
 # Sidebar: Quick Navigation & Session Summary
@@ -275,24 +453,21 @@ with card:
         st.markdown("")
 
         # Connection controls
-        col_cfg, col_cfgfile = st.columns([1, 2])
-        with col_cfg:
-            cfg_select = st.selectbox(
-                "SAS Configuration (cfgname)",
-                options=["oda", "ssh", "default"],
-                index=0,
-                key="step1_cfg_select",
-            )
-        with col_cfgfile:
+        col_conCtrls, col_init = st.columns([1, 1])
+        with col_conCtrls:
             cfgfile_input = st.text_input(
-                "Custom sascfg File Path (cfgfile, optional)",
+                "Custom sascfg File Path (cfgfile)",
                 value=DEFAULT_SAS_CFGFILE,
                 placeholder=r"e.g. C:\Users\user\sascfg_personal.py",
                 key="step1_cfgfile"
             )
-
-        col_connBtns = st.columns([1,2])
-        with col_connBtns[0]:
+            cfg_select = st.selectbox(
+                "SAS Configuration (cfgname)",
+                #options=["oda", "ssh", "default"],
+                options=extract_sas_config_names(cfgfile_input),
+                index=0,
+                key="step1_cfg_select",
+            )
             st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
             if st.button("🔌 Connect to SAS", type="primary", use_container_width=True):
                 with st.spinner("Connecting to SAS via SASPy..."):
@@ -308,39 +483,37 @@ with card:
             st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
             if st.button("🔌 Disconnect", use_container_width=True):
                 msg = sas_backend.disconnect()
+                st.session_state.pop("step3_autoload_uid", None)
                 st.session_state.sas_status_msg = f"⚪ {msg}"
                 st.session_state["sas_connected"] = False
                 st.session_state.env_init_msg = ""
                 st.session_state.step = 0
                 st.rerun()
 
-        st.markdown("---")
         # -------------------------------------------------------------------------
         # UI that should only appear after a successful SAS connection
         # -------------------------------------------------------------------------
         if sas_backend.is_connected:
-            st.markdown("---")
-            st.markdown("#### ⚙️ Session Environment Parameters")
-
-            proj_path_input = st.text_input(
-                "SAS Project Root Path (contains code/macros, data, output)",
-                value=str(SAS_PROJECT_ROOT),
-                key="step1_proj_path",
-            )
-
-            api_key_input = st.text_input(
-                "Census API Key (masked, assigned to global &g_apiKey)",
-                value=st.session_state.get("step1_api_key", ""),
-                type="password",
-                key="step1_api_key",
-                help="Optional API key from api.census.gov/data/key_signup.html",
-            )
 
             # -----------------------------------------------------------------
             # Initialise SAS Autocall & libnames (still inside the guard)
             # -----------------------------------------------------------------
-            col_init, _ = st.columns([2, 2])
             with col_init:
+                st.markdown("#### ⚙️ Session Environment Parameters")
+
+                proj_path_input = st.text_input(
+                    "SAS Project Root Path (contains code/macros, data, output)",
+                    value=str(SAS_PROJECT_ROOT),
+                    key="step1_proj_path",
+                )
+
+                api_key_input = st.text_input(
+                    "Census API Key (masked, assigned to global &g_apiKey)",
+                    value=st.session_state.get("step1_api_key", ""),
+                    type="password",
+                    key="step1_api_key",
+                    help="Optional API key from api.census.gov/data/key_signup.html",
+                )
                 if st.button(
                     "⚙️ Initialize SAS Autocall & Libnames",
                     type="secondary",
@@ -359,20 +532,21 @@ with card:
                             st.session_state.step1_result = {"res": env_res}
                         st.rerun()
 
-            # Show SAS log if a step‑1 run already happened
-            if st.session_state.step1_result is not None:
-                env_res = st.session_state.step1_result["res"]
-                with st.expander(
-                    f"📋 SAS Log ({len(env_res.get('log', '').splitlines())} lines)",
-                    expanded=False,
-                ):
-                    st.code(env_res.get("log", ""), language="sas")
+                # Show any init‑message
+                if st.session_state.env_init_msg:
+                    st.info(st.session_state.env_init_msg)
 
-        # Show any init‑message
-        if st.session_state.env_init_msg:
-            st.info(st.session_state.env_init_msg)
+                # Show SAS log if a step‑1 run already happened
+                if st.session_state.step1_result is not None:
+                    env_res = st.session_state.step1_result["res"]
+                    with st.expander(
+                        f"📋 SAS Log ({len(env_res.get('log', '').splitlines())} lines)",
+                        expanded=False,
+                    ):
+                        st.code(env_res.get("log", ""), language="sas")
 
         st.markdown("---")
+
         col_tip, col_next = st.columns([3, 1])
         with col_tip:
             st.caption("💡 *Tip: If running offline without SAS, you can still configure parameters and download SAS scripts in subsequent steps.*")
@@ -390,30 +564,74 @@ with card:
             "Downloads the official Census `data.json` catalog, parses all available API endpoints, vintages, "
             "and titles into a SAS master dataset (`APILIB._API_ALL_DATA`), and produces an Excel inventory."
         )
-
-        with st.form("step2_form"):
-            col1, col2 = st.columns(2)
-            with col1:
+        col1, col2 = st.columns(2)
+        # ------------------------------
+        # Display form for Step 2 inputs
+        # ------------------------------
+        with col1:
+            with st.form("step2_form"):
                 p_outLibName = st.text_input("Output SAS Library (p_outLibName)", value=DEFAULT_OUT_LIB)
-            with col2:
                 p_outDsName = st.text_input("Output Dataset Name (p_outDsName)", value=DEFAULT_OUT_DS)
+                p_dataJsonURL = st.text_input("Census Catalog JSON URL (p_dataJsonURL)", value=DEFAULT_DATA_JSON_URL)
+                p_reportOutputPath = st.text_input("Report Output Path (p_reportOutputPath)", value="&g_outputRoot")
+                submit_step2 = st.form_submit_button("▶ Submit & Run in SAS", type="primary")
+        # -------------------------------------------
+        # Display the results of submitting the form
+        # -------------------------------------------
+        with col2:
+            sas_code_step2 = f"""/* Step 2: Collect all Census Data API datasets metadata */
+    %censusapi_getAllDataSets(
+        p_outLibName={p_outLibName}
+    , p_outDsName={p_outDsName}
+    , p_dataJsonURL=%str({p_dataJsonURL})
+    , p_reportOutputPath={p_reportOutputPath}
+    );
+    """
+            if submit_step2:
+                if not sas_backend.is_connected:
+                    st.warning("⚠️ **SAS is not connected.** Return to Step 1 and connect via SASPy first.")
+                else:
+                    with st.spinner("Running %censusapi_getAllDataSets in SAS..."):
+                        res = sas_backend.submit_code(sas_code_step2)
+                        # Fetch only seleced columns for preview
+                        df = sas_backend.fetch_dataframe(p_outDsName, p_outLibName, ds_opts={"KEEP": "_rowid_ ds_unique_id baseurl c_vintage title description modified Spatial microdata_i"}) if res.get("success", False) else None
+                        # Store the result in session state
+                        st.session_state.step2_result = {
+                            "res": res,
+                            "df": df,
+                            "lib": p_outLibName,
+                            "ds": p_outDsName,
+                        }
 
-            p_dataJsonURL = st.text_input("Census Catalog JSON URL (p_dataJsonURL)", value=DEFAULT_DATA_JSON_URL)
-            p_reportOutputPath = st.text_input("Report Output Path (p_reportOutputPath)", value="&g_outputRoot")
+            # Show execution results if available
+            if st.session_state.step2_result:
+                r = st.session_state.step2_result["res"]
+                if r.get("success", False):
+                    st.success("✅ **Step 2 Macro executed successfully!** (0 SAS errors)")
+                elif r.get("fetched", False):
+                    st.success("✅ **Step 2: Fetched existing SAS data set**")
+                else:
+                    st.error(f"❌ **Macro finished with errors** ({len(r.get('errors', []))} error lines found)")
 
-            submit_step2 = st.form_submit_button("▶ Submit & Run in SAS", type="primary")
+                with st.expander(f"📋 SAS Log ({len(r.get('log', '').splitlines())} lines)", expanded=False):
+                    st.code(r.get("log", ""), language="sas")
 
-        sas_code_step2 = f"""/* Step 2: Collect all Census Data API datasets metadata */
-%censusapi_getAllDataSets(
-    p_outLibName={p_outLibName}
-  , p_outDsName={p_outDsName}
-  , p_dataJsonURL=%str({p_dataJsonURL})
-  , p_reportOutputPath={p_reportOutputPath}
-);
-"""
+            with st.expander("📝 Generated SAS Code Preview & Download", expanded=False):
+                st.code(sas_code_step2, language="sas")
+
+            st.download_button(
+                label="💾 Download .sas Script",
+                data=sas_code_step2.encode("utf-8"),
+                file_name="step2_getAllDataSets.sas",
+                mime="text/plain",
+            )
+        # ------------------------------------------------------------------------
         # Check for existing dataset only once if not already fetched or executed
+        # ------------------------------------------------------------------------
         if st.session_state.step2_result is None and sas_backend.is_connected:
-            existing_df = sas_backend.fetch_dataframe(p_outDsName, p_outLibName)
+            # Fetch only seleced columns for preview
+            existing_df = sas_backend.fetch_dataframe(p_outDsName, p_outLibName, ds_opts={"KEEP": "_rowid_ ds_unique_id baseurl c_vintage title description modified Spatial microdata_i"})
+
             if existing_df is not None and not existing_df.empty:
                 st.session_state.step2_result = {
                     "res": {
@@ -427,60 +645,98 @@ with card:
                     "ds": p_outDsName,
                 }
 
-        if submit_step2:
-            if not sas_backend.is_connected:
-                st.warning("⚠️ **SAS is not connected.** Return to Step 1 and connect via SASPy first.")
-            else:
-                with st.spinner("Running %censusapi_getAllDataSets in SAS..."):
-                    res = sas_backend.submit_code(sas_code_step2)
-                    df = sas_backend.fetch_dataframe(p_outDsName, p_outLibName) if res.get("success", False) else None
-                    st.session_state.step2_result = {
-                        "res": res,
-                        "df": df,
-                        "lib": p_outLibName,
-                        "ds": p_outDsName,
-                    }
-
+        # ------------------------------------
         # Show execution results if available
+        # ------------------------------------
         if st.session_state.step2_result:
-            r = st.session_state.step2_result["res"]
-            if r.get("success", False):
-                st.success("✅ **Step 2 Macro executed successfully!** (0 SAS errors)")
-            elif r.get("fetched", False):
-                st.success("✅ **Step 2: Fetched existing SAS data set**")
-            else:
-                st.error(f"❌ **Macro finished with errors** ({len(r.get('errors', []))} error lines found)")
-
-            with st.expander(f"📋 SAS Log ({len(r.get('log', '').splitlines())} lines)", expanded=False):
-                st.code(r.get("log", ""), language="sas")
-
             df = st.session_state.step2_result.get("df")
             if df is not None and not df.empty:
+                persisted_row = st.session_state.get("selected_row")
+                selected_index = find_row_index(
+                    df,
+                    persisted_row,
+                    key_column="_ROWID_",
+                )
+                if selected_index is None:
+                    persisted_index = st.session_state.get("selected_index")
+                    if isinstance(persisted_index, int) and 0 <= persisted_index < len(df):
+                        selected_index = persisted_index
+
                 st.markdown(f"#### 📊 Dataset Preview: `{st.session_state.step2_result['lib']}.{st.session_state.step2_result['ds']}` ({len(df)} rows, {len(df.columns)} columns)")
                 # Build selectable grid using AgGrid
                 gb = GridOptionsBuilder.from_dataframe(df)
-                gb.configure_selection(selection_mode="single", use_checkbox=False)
+                gb.configure_selection(
+                    selection_mode="single",
+                    use_checkbox=False,
+                    pre_selected_rows=(
+                        [selected_index] if selected_index is not None else []
+                    ),
+                )
+                auto_size_columns = JsCode(
+                    """
+                    function(params) {
+                        const columnIds = [];
+                        params.api.getAllGridColumns().forEach(column => {
+                            columnIds.push(column.getColId());
+                        });
+                        params.api.autoSizeColumns(columnIds, false);
+                    }
+                    """
+                )
                 grid_options = gb.build()
+                grid_options["autoSizeStrategy"] = {"type": "fitCellContents"}
+                grid_options["suppressColumnVirtualisation"] = True
+                grid_options["onGridReady"] = auto_size_columns
+                grid_options["firstDataRendered"] = auto_size_columns
                 grid_res = AgGrid(
                     df,
                     gridOptions=grid_options,
-                    update_mode=GridUpdateMode.SELECTION_CHANGED,
-                    height=400,
-                    fit_columns_on_grid_load=True,
+                    update_on=["selectionChanged"],
+                    height=500,
+                    fit_columns_on_grid_load=False,
+                    allow_unsafe_jscode=True,
+                    key="data-grid-step2"
                 )
-                selected = grid_res["selected_rows"]
-                if selected:
-                    st.session_state["selected_row"] = selected[0]
 
-        st.markdown("#### 📝 Generated SAS Code Preview:")
-        st.code(sas_code_step2, language="sas")
+                #---------------------------------------------------------------
+                # Get selected row and display it
+                #---------------------------------------------------------------
+                selected_row = normalize_selected_row(grid_res.get("selected_rows", None))
+                if selected_row is None:
+                    selected_row = persisted_row
+                if selected_row is None and selected_index is not None:
+                    selected_row = df.iloc[selected_index].to_dict()
 
-        st.download_button(
-            label="💾 Download .sas Script",
-            data=sas_code_step2.encode("utf-8"),
-            file_name="step2_getAllDataSets.sas",
-            mime="text/plain",
-        )
+                if selected_row is not None:
+                    row_id = selected_row["_ROWID_"]
+                    ds_unique_id = selected_row["ds_unique_id"]
+                    selected_index = find_row_index(
+                        df,
+                        selected_row,
+                        key_column="_ROWID_",
+                    )
+                    # Store the selected row and index in session state for persistence across steps
+                    st.session_state["selected_index"] = selected_index
+                    st.session_state["selected_row"] = selected_row
+                    st.session_state["selected_row_id"] = row_id
+                    st.session_state["selected_ds_unique_id"] = ds_unique_id
+
+                    # ---------------------------------------------------
+                    # Display selected row details in a two-column layout
+                    # ---------------------------------------------------
+                    st.subheader("Selected row")
+                    left_column, right_column = st.columns([1,2])
+                    with left_column:
+                        st.text_input("Rowid",value=str(selected_row.get("_ROWID_", "")),disabled=False)
+                        st.text_input("Dataset Unique ID",value=str(selected_row.get("ds_unique_id","")),disabled=False)
+                        st.text_input("Base URL",value=str(selected_row.get("BaseURL", "")),disabled=False)
+                        st.text_input("Collection Vintage",value=str(selected_row.get("c_vintage", "")),disabled=False)
+                        st.text_input("Modified",value=str(selected_row.get("modified", "")),disabled=False)
+                        st.text_input("Spatial",value=str(selected_row.get("spatial", "")),disabled=False,)
+                        st.text_input("Microdata ID",value=str(selected_row.get("Microdata_i", "")),disabled=False)
+                    with right_column:
+                        st.text_input("Title",value=str(selected_row.get("title", "")),disabled=False)
+                        st.text_area("Description",value=str(selected_row.get("description", "")),height=400, disabled=False)
 
         st.markdown("---")
         col_back, col_next = st.columns([1, 1])
@@ -502,58 +758,124 @@ with card:
             "valid geography levels, and sample API queries into individual SAS tables and an Excel report."
         )
 
-        with st.form("step3_form"):
-            col1, col2 = st.columns(2)
-            with col1:
+        col1, col2 = st.columns(2)
+        with col1:
+            with st.form("step3_form"):
                 p_apiListingLibName = st.text_input("Catalog Libname (p_apiListingLibName)", value=DEFAULT_OUT_LIB)
-            with col2:
                 p_apiListingDsName = st.text_input("Catalog Dataset Name (p_apiListingDsName)", value=DEFAULT_OUT_DS)
-
-            col3, col4 = st.columns(2)
-            with col3:
-                p_dsRowId = st.number_input("Dataset _ROWID_ (p_dsRowId)", value=3, min_value=1, max_value=100000, step=1)
-            with col4:
+                p_dsRowId = st.text_input("Dataset _ROWID_ (p_dsRowId)", value=f"{st.session_state.get("selected_row_id", 3)}", key="step3_row_id")
                 p_reportOutputPath = st.text_input("Report Output Path (p_reportOutputPath)", value="&g_outputRoot", key="step3_out_path")
+                reuse_step3 = st.checkbox(
+                    "Reuse existing profile tables (skip the SAS macro if all four exist)", value=True, key="step3_reuse"
+                )
+                submit_step3 = st.form_submit_button("▶ Submit & Run in SAS", type="primary")
 
-            submit_step3 = st.form_submit_button("▶ Submit & Run in SAS", type="primary")
+        with col2:
+            sas_code_step3 = f"""/* Step 3: Compose complete Profile of the specified dataset */
+    %censusapi_getDsFullInfo(
+        p_apiListingLibName={p_apiListingLibName}
+    , p_apiListingDsName={p_apiListingDsName}
+    , p_dsRowId={p_dsRowId}
+    , p_reportOutputPath={p_reportOutputPath}
+    );
+    """
+            if submit_step3:
+                if not sas_backend.is_connected:
+                    st.warning("⚠️ **SAS is not connected.** Return to Step 1 and connect via SASPy first.")
+                else:
+                    uid = st.session_state.get("selected_ds_unique_id", "")
+                    existing = find_step3_tables(uid) if reuse_step3 else {}
+                    if len(existing) == len(STEP3_TABS):
+                        res = {
+                            "success": True, "has_errors": False, "errors": [], "warnings": [], "lst": "",
+                            "log": "Reused existing APILIB profile tables; %censusapi_getDsFullInfo was not re-run.",
+                        }
+                        found = existing
+                    else:
+                        with st.spinner("Running %censusapi_getDsFullInfo in SAS..."):
+                            res = sas_backend.submit_code(sas_code_step3)
+                            found = find_step3_tables(uid) if res["success"] else {}
+                    with st.spinner("Loading profile tables..."):
+                        tables = {
+                            label: (table, sas_backend.fetch_dataframe(table, STEP3_LIBREF))
+                            for label, table in found.items()
+                        }
+                    st.session_state.step3_result = {"res": res, "tables": tables, "uid": uid}
 
-        sas_code_step3 = f"""/* Step 3: Compose complete Profile of the specified dataset */
-%censusapi_getDsFullInfo(
-    p_apiListingLibName={p_apiListingLibName}
-  , p_apiListingDsName={p_apiListingDsName}
-  , p_dsRowId={p_dsRowId}
-  , p_reportOutputPath={p_reportOutputPath}
-);
-"""
-        if submit_step3:
-            if not sas_backend.is_connected:
-                st.warning("⚠️ **SAS is not connected.** Return to Step 1 and connect via SASPy first.")
-            else:
-                with st.spinner("Running %censusapi_getDsFullInfo in SAS..."):
-                    res = sas_backend.submit_code(sas_code_step3)
-                    st.session_state.step3_result = {"res": res}
+            # Auto-load cached profile tables that match the selected ds_unique_id
+            current_uid = str(st.session_state.get("selected_ds_unique_id", "") or "")
+            loaded = st.session_state.step3_result
+            if (
+                sas_backend.is_connected
+                and current_uid
+                and (loaded or {}).get("uid") != current_uid
+                and st.session_state.get("step3_autoload_uid") != current_uid
+            ):
+                st.session_state.step3_autoload_uid = current_uid
+                with st.spinner("Checking SAS for existing profile tables..."):
+                    found = find_step3_tables(current_uid)
+                    if found:
+                        st.session_state.step3_result = {
+                            "res": {
+                                "success": True, "has_errors": False, "errors": [], "warnings": [], "lst": "",
+                                "log": f"Loaded existing APILIB profile tables for {current_uid}; macro not re-run.",
+                            },
+                            "tables": {
+                                label: (table, sas_backend.fetch_dataframe(table, STEP3_LIBREF))
+                                for label, table in found.items()
+                            },
+                            "uid": current_uid,
+                        }
+                    elif loaded and loaded.get("uid") != current_uid:
+                        st.session_state.step3_result = None
 
-        if st.session_state.step3_result:
-            r = st.session_state.step3_result["res"]
-            if r["success"]:
-                st.success("✅ **Step 3 Profile executed successfully!** (0 SAS errors)")
-            else:
-                st.error(f"❌ **Execution finished with errors** ({len(r.get('errors', []))} error lines found)")
+            if st.session_state.step3_result:
+                r = st.session_state.step3_result["res"]
+                if r["success"]:
+                    st.success("✅ **Step 3 Profile executed successfully!** (0 SAS errors)")
+                else:
+                    st.error(f"❌ **Execution finished with errors** ({len(r.get('errors', []))} error lines found)")
 
-            with st.expander(f"📋 SAS Log ({len(r.get('log', '').splitlines())} lines)", expanded=False):
-                st.code(r.get("log", ""), language="sas")
+                with st.expander(f"📋 SAS Log ({len(r.get('log', '').splitlines())} lines)", expanded=False):
+                    st.code(r.get("log", ""), language="sas")
 
-        st.markdown("#### 📝 Generated SAS Code Preview:")
-        st.code(sas_code_step3, language="sas")
+            with st.expander("📝 Generated SAS Code Preview", expanded=False):
+                st.code(sas_code_step3, language="sas")
 
-        st.download_button(
-            label="💾 Download .sas Script",
-            data=sas_code_step3.encode("utf-8"),
-            file_name="step3_getDsFullInfo.sas",
-            mime="text/plain",
-        )
+                st.download_button(
+                    label="💾 Download .sas Script",
+                    data=sas_code_step3.encode("utf-8"),
+                    file_name="step3_getDsFullInfo.sas",
+                    mime="text/plain",
+                )
+
+        # ------------------------------------
+        # Profile tables: one grid per tab
+        # ------------------------------------
+        step3_result = st.session_state.step3_result
+        if step3_result and step3_result["res"]["success"]:
+            tables = step3_result.get("tables", {})
+            tabs = st.tabs([label for label, _ in STEP3_TABS])
+            for tab, (label, suffix) in zip(tabs, STEP3_TABS):
+                with tab.container():
+                    table, df = tables.get(label, (None, None))
+                    if table is None:
+                        st.info(f"No `{STEP3_LIBREF}` table ending in `{suffix}` was found for this dataset.")
+                    elif df is None:
+                        st.info(f"Table `{STEP3_LIBREF}.{table}` could not be loaded from SAS.")
+                    elif df.empty:
+                        st.info(f"Table `{STEP3_LIBREF}.{table}` has no rows.")
+                    else:
+                        st.caption(f"`{STEP3_LIBREF}.{table}` — {len(df)} rows, {len(df.columns)} columns")
+                        render_grid(df, key=f"data-grid-step3-{label}")
+
+            if st.button("🔄 Refresh tables from SAS (bypass cache)", key="step3_refresh"):
+                for label, (table, _) in tables.items():
+                    tables[label] = (table, sas_backend.fetch_dataframe(table, STEP3_LIBREF, force_refresh=True))
+                st.rerun()
 
         st.markdown("---")
+
         col_back, col_next = st.columns([1, 1])
         with col_back:
             if st.button("< Back: Collect Datasets", use_container_width=True):
@@ -611,7 +933,7 @@ with card:
             selected_url = endpoint_options.get(selected_label, "")
             st.markdown(f"**Selected Endpoint**: `{selected_url}`")
 
-            if st.button("📋 Apply Endpoint to Step 5 Query Builder", type="success", use_container_width=False):
+            if st.button("📋 Apply Endpoint to Step 5 Query Builder", type="primary", use_container_width=False):
                 st.session_state.picked_endpoint = selected_url
                 st.session_state.endpoint_selected = True
                 st.success(f"Applied: {selected_url}")

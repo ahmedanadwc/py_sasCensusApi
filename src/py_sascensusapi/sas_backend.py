@@ -1,5 +1,8 @@
+import hashlib
+import json
 import logging
 import re
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 import pandas as pd
 
@@ -12,13 +15,16 @@ from py_sascensusapi.config import (
 
 logger = logging.getLogger(__name__)
 
+DF_CACHE_DIR = Path.home() / ".cache" / "py_sascensusapi" / "dataframes"
+
 class SASBackend:
     """Manages the SASPy session and macro executions."""
-    
+
     def __init__(self, cfgname: str = "oda", cfgfile: Optional[str] = DEFAULT_SAS_CFGFILE) -> None:
         self._sas: Optional[Any] = None
         self._cfgname: Optional[str] = cfgname
         self._cfgfile: Optional[str] = cfgfile if cfgfile else None
+        self._df_cache: Dict[str, pd.DataFrame] = {}
 
     @property
     def is_connected(self) -> bool:
@@ -45,7 +51,7 @@ class SASBackend:
 
             logger.info(f"Initializing SASsession with kwargs: {kwargs}")
             self._sas = saspy.SASsession(**kwargs)
-            
+
             info_str = f"cfgname='{self._cfgname}'"
             if self._cfgfile:
                 info_str += f", cfgfile='{self._cfgfile}'"
@@ -65,6 +71,7 @@ class SASBackend:
             finally:
                 self._sas = None
                 self._cfgname = None
+                self.clear_cache()
             return "SAS session ended."
         return "No active SAS session."
 
@@ -85,6 +92,7 @@ class SASBackend:
 %let g_projRootPath = %str({clean_root});
 %let g_outputRoot = %str({out_path});
 %let g_apiKey = %str({api_key});
+%let g_slash = %str(/);
 
 /* Macro autocall directories */
 options sasautos=(SASAUTOS, {macro_paths}) mautosource;
@@ -113,11 +121,11 @@ options fmtsearch=(WORK apilib);
             res = self._sas.submit(code)
             log = res.get("LOG", "")
             lst = res.get("LST", "")
-            
+
             # Detect errors and warnings in SAS log
             errors = re.findall(r"^ERROR:.*$", log, flags=re.MULTILINE)
             warnings = re.findall(r"^WARNING:.*$", log, flags=re.MULTILINE)
-            
+
             return {
                 "success": len(errors) == 0,
                 "log": log,
@@ -135,18 +143,73 @@ options fmtsearch=(WORK apilib);
                 "errors": [str(exc)],
             }
 
-    def fetch_dataframe(self, table_name: str, libref: str = "WORK") -> Optional[pd.DataFrame]:
-        """Retrieve a SAS table into a pandas DataFrame using saspy."""
-        if not self.is_connected or self._sas is None:
+    def clear_cache(self, disk: bool = False) -> None:
+        """Drop cached DataFrames (memory always, parquet files when disk=True)."""
+        self._df_cache.clear()
+        if disk and DF_CACHE_DIR.exists():
+            for f in DF_CACHE_DIR.glob("*.parquet"):
+                f.unlink(missing_ok=True)
+
+    def _table_stamp(self, table_name: str, libref: str) -> Optional[str]:
+        """Cheap freshness token (modate|nobs) read from SAS; None if unavailable."""
+        if self._sas is None:
             return None
         try:
-            sas_data = self._sas.sasdata(table_name, libref)
+            lib, tbl = libref.upper().replace("'", ""), table_name.upper().replace("'", "")
+            self._sas.submit(
+                "proc sql noprint; select put(modate, 20.6), put(nobs, 20.) "
+                "into :_pyc_mod trimmed, :_pyc_nobs trimmed from dictionary.tables "
+                f"where libname='{lib}' and memname='{tbl}' and memtype='DATA'; quit;"
+            )
+            mod, nobs = self._sas.symget("_pyc_mod"), self._sas.symget("_pyc_nobs")
+            return f"{mod}|{nobs}" if mod not in ("", None) else None
+        except Exception as exc:
+            logger.warning("Could not read freshness stamp for %s.%s: %s", libref, table_name, exc)
+            return None
+
+    def fetch_dataframe(
+        self,
+        table_name: str,
+        libref: str = "WORK",
+        ds_opts: Dict[str, Any] = None,
+        force_refresh: bool = False,
+    ) -> Optional[pd.DataFrame]:
+        """Retrieve a SAS table into a pandas DataFrame, cached by table, options and modify-time."""
+        if not self.is_connected or self._sas is None:
+            return None
+
+        stamp = None if force_refresh else self._table_stamp(table_name, libref)
+        key = None
+        if stamp:
+            raw = json.dumps([libref.upper(), table_name.upper(), ds_opts, stamp], sort_keys=True, default=str)
+            key = hashlib.sha1(raw.encode("utf-8")).hexdigest()
+            if key in self._df_cache:
+                return self._df_cache[key].copy()
+            parquet = DF_CACHE_DIR / f"{key}.parquet"
+            if parquet.exists():
+                try:
+                    df = pd.read_parquet(parquet)
+                    self._df_cache[key] = df
+                    return df.copy()
+                except Exception as exc:
+                    logger.warning("Ignoring unreadable cache file %s: %s", parquet, exc)
+
+        try:
+            sas_data = self._sas.sasdata(table_name, libref, dsopts=ds_opts)
             df = sas_data.to_df()
-            return df
         except Exception as exc:
             logger.warning("Could not convert SAS table %s.%s to DataFrame: %s", libref, table_name, exc)
             return None
 
+        if key is not None and df is not None:
+            self._df_cache[key] = df
+            try:
+                DF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                df.to_parquet(DF_CACHE_DIR / f"{key}.parquet")
+            except Exception as exc:
+                logger.info("Parquet cache write skipped for %s.%s: %s", libref, table_name, exc)
+        return df.copy() if df is not None else None
 
-# Global singleton instance for the Marimo app
+
+# Global singleton instance for the Streamlit app
 sas_backend = SASBackend()
