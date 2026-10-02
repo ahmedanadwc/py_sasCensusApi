@@ -1,3 +1,4 @@
+from functools import cache
 from pathlib import Path
 import ast
 
@@ -5,6 +6,7 @@ import ast
 APP_PATH = Path(__file__).parents[1] / "streamlit_app.py"
 
 
+@cache
 def _load_highest_unlocked_step():
     source = APP_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -100,3 +102,21 @@ def test_disconnect_relocks_wizard_even_with_previous_results():
         True,
         "https://api.example.test",
     ) == 0
+
+
+def test_aggrid_autosizes_columns_to_cell_contents():
+    source = APP_PATH.read_text(encoding="utf-8")
+    assert "from st_aggrid import AgGrid, GridOptionsBuilder, JsCode" in source
+    assert "params.api.autoSizeColumns(columnIds, false);" in source
+    assert 'grid_options["autoSizeStrategy"] = {"type": "fitCellContents"}' in source
+    assert 'grid_options["onGridReady"] = auto_size_columns' in source
+    assert "fit_columns_on_grid_load=False" in source
+    assert "allow_unsafe_jscode=True" in source
+
+
+def test_step2_reuses_persisted_selection_when_grid_returns_no_selection():
+    source = APP_PATH.read_text(encoding="utf-8")
+    assert 'persisted_row = st.session_state.get("selected_row")' in source
+    assert 'selected_row = normalize_selected_row(grid_res.get("selected_rows", None))' in source
+    assert 'if selected_row is None:\n                    selected_row = persisted_row' in source
+    assert 'pre_selected_rows=(' in source
