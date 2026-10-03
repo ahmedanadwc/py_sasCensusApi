@@ -1,0 +1,273 @@
+{
+  "census_regions": {
+    "1": {
+      "name": "Northeast",
+      "divisions": {
+        "1": {
+          "name": "New England",
+          "states": {
+            "09": {
+              "name": "Connecticut",
+              "abbreviation": "CT"
+            },
+            "23": {
+              "name": "Maine",
+              "abbreviation": "ME"
+            },
+            "25": {
+              "name": "Massachusetts",
+              "abbreviation": "MA"
+            },
+            "33": {
+              "name": "New Hampshire",
+              "abbreviation": "NH"
+            },
+            "44": {
+              "name": "Rhode Island",
+              "abbreviation": "RI"
+            },
+            "50": {
+              "name": "Vermont",
+              "abbreviation": "VT"
+            }
+          }
+        },
+        "2": {
+          "name": "Middle Atlantic",
+          "states": {
+            "34": {
+              "name": "New Jersey",
+              "abbreviation": "NJ"
+            },
+            "36": {
+              "name": "New York",
+              "abbreviation": "NY"
+            },
+            "42": {
+              "name": "Pennsylvania",
+              "abbreviation": "PA"
+            }
+          }
+        }
+      }
+    },
+    "2": {
+      "name": "Midwest",
+      "divisions": {
+        "3": {
+          "name": "East North Central",
+          "states": {
+            "17": {
+              "name": "Illinois",
+              "abbreviation": "IL"
+            },
+            "18": {
+              "name": "Indiana",
+              "abbreviation": "IN"
+            },
+            "26": {
+              "name": "Michigan",
+              "abbreviation": "MI"
+            },
+            "39": {
+              "name": "Ohio",
+              "abbreviation": "OH"
+            },
+            "55": {
+              "name": "Wisconsin",
+              "abbreviation": "WI"
+            }
+          }
+        },
+        "4": {
+          "name": "West North Central",
+          "states": {
+            "19": {
+              "name": "Iowa",
+              "abbreviation": "IA"
+            },
+            "20": {
+              "name": "Kansas",
+              "abbreviation": "KS"
+            },
+            "27": {
+              "name": "Minnesota",
+              "abbreviation": "MN"
+            },
+            "29": {
+              "name": "Missouri",
+              "abbreviation": "MO"
+            },
+            "31": {
+              "name": "Nebraska",
+              "abbreviation": "NE"
+            },
+            "38": {
+              "name": "North Dakota",
+              "abbreviation": "ND"
+            },
+            "46": {
+              "name": "South Dakota",
+              "abbreviation": "SD"
+            }
+          }
+        }
+      }
+    },
+    "3": {
+      "name": "South",
+      "divisions": {
+        "5": {
+          "name": "South Atlantic",
+          "states": {
+            "10": {
+              "name": "Delaware",
+              "abbreviation": "DE"
+            },
+            "11": {
+              "name": "District of Columbia",
+              "abbreviation": "DC"
+            },
+            "12": {
+              "name": "Florida",
+              "abbreviation": "FL"
+            },
+            "13": {
+              "name": "Georgia",
+              "abbreviation": "GA"
+            },
+            "24": {
+              "name": "Maryland",
+              "abbreviation": "MD"
+            },
+            "37": {
+              "name": "North Carolina",
+              "abbreviation": "NC"
+            },
+            "45": {
+              "name": "South Carolina",
+              "abbreviation": "SC"
+            },
+            "51": {
+              "name": "Virginia",
+              "abbreviation": "VA"
+            },
+            "54": {
+              "name": "West Virginia",
+              "abbreviation": "WV"
+            }
+          }
+        },
+        "6": {
+          "name": "East South Central",
+          "states": {
+            "01": {
+              "name": "Alabama",
+              "abbreviation": "AL"
+            },
+            "21": {
+              "name": "Kentucky",
+              "abbreviation": "KY"
+            },
+            "28": {
+              "name": "Mississippi",
+              "abbreviation": "MS"
+            },
+            "47": {
+              "name": "Tennessee",
+              "abbreviation": "TN"
+            }
+          }
+        },
+        "7": {
+          "name": "West South Central",
+          "states": {
+            "05": {
+              "name": "Arkansas",
+              "abbreviation": "AR"
+            },
+            "22": {
+              "name": "Louisiana",
+              "abbreviation": "LA"
+            },
+            "40": {
+              "name": "Oklahoma",
+              "abbreviation": "OK"
+            },
+            "48": {
+              "name": "Texas",
+              "abbreviation": "TX"
+            }
+          }
+        }
+      }
+    },
+    "4": {
+      "name": "West",
+      "divisions": {
+        "8": {
+          "name": "Mountain",
+          "states": {
+            "04": {
+              "name": "Arizona",
+              "abbreviation": "AZ"
+            },
+            "08": {
+              "name": "Colorado",
+              "abbreviation": "CO"
+            },
+            "16": {
+              "name": "Idaho",
+              "abbreviation": "ID"
+            },
+            "30": {
+              "name": "Montana",
+              "abbreviation": "MT"
+            },
+            "32": {
+              "name": "Nevada",
+              "abbreviation": "NV"
+            },
+            "35": {
+              "name": "New Mexico",
+              "abbreviation": "NM"
+            },
+            "49": {
+              "name": "Utah",
+              "abbreviation": "UT"
+            },
+            "56": {
+              "name": "Wyoming",
+              "abbreviation": "WY"
+            }
+          }
+        },
+        "9": {
+          "name": "Pacific",
+          "states": {
+            "02": {
+              "name": "Alaska",
+              "abbreviation": "AK"
+            },
+            "06": {
+              "name": "California",
+              "abbreviation": "CA"
+            },
+            "15": {
+              "name": "Hawaii",
+              "abbreviation": "HI"
+            },
+            "41": {
+              "name": "Oregon",
+              "abbreviation": "OR"
+            },
+            "53": {
+              "name": "Washington",
+              "abbreviation": "WA"
+            }
+          }
+        }
+      }
+    }
+  }
+}

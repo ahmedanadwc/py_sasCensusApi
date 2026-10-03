@@ -1,0 +1,90 @@
+"""Census region / division / state lookups built from census_reg_div_lkup.json."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import streamlit as st
+
+_PKG_DIR = Path(__file__).resolve().parent
+GEO_JSON_NAME = "census_reg_div_lkup.json"
+# Package folder first, then the repository root (where the file currently lives).
+GEO_JSON_CANDIDATES = [_PKG_DIR / GEO_JSON_NAME, _PKG_DIR.parents[1] / GEO_JSON_NAME]
+
+
+def find_geo_json() -> Path:
+    """Return the first existing lookup JSON path, or raise FileNotFoundError."""
+    for candidate in GEO_JSON_CANDIDATES:
+        if candidate.exists():
+            return candidate
+    searched = ", ".join(str(c) for c in GEO_JSON_CANDIDATES)
+    raise FileNotFoundError(f"{GEO_JSON_NAME} not found (searched: {searched})")
+
+
+def flatten_hierarchy(data: dict) -> list[dict]:
+    """Flatten the region > division > state JSON into one full-path dict per state."""
+    rows: list[dict] = []
+    for region_id, region in data.get("census_regions", {}).items():
+        for division_id, division in region.get("divisions", {}).items():
+            for fips, state in division.get("states", {}).items():
+                rows.append(
+                    {
+                        "region": region.get("name", ""),
+                        "region_id": str(region_id),
+                        "division": division.get("name", ""),
+                        "division_id": str(division_id),
+                        "state": state.get("name", ""),
+                        "state_fips": str(fips),
+                        "state_abbrev": state.get("abbreviation", ""),
+                    }
+                )
+    return rows
+
+
+@st.cache_data(show_spinner=False)
+def load_geo_rows(path: str | None = None) -> list[dict]:
+    """Load and flatten the lookup JSON once (cached)."""
+    json_path = Path(path) if path else find_geo_json()
+    with open(json_path, "r", encoding="utf-8") as f:
+        return flatten_hierarchy(json.load(f))
+
+
+def _unique(values) -> list[str]:
+    return list(dict.fromkeys(values))
+
+
+def state_label(row: dict) -> str:
+    """Display label for a state option, e.g. 'Connecticut (CT)'."""
+    return f"{row['state']} ({row['state_abbrev']})"
+
+
+def region_options(rows: list[dict]) -> list[str]:
+    return _unique(r["region"] for r in rows)
+
+
+def division_options(rows: list[dict], regions: list[str]) -> list[str]:
+    """Divisions that belong to any of the selected regions."""
+    return _unique(r["division"] for r in rows if r["region"] in regions)
+
+
+def state_options(rows: list[dict], divisions: list[str]) -> list[str]:
+    """State labels that belong to any of the selected divisions."""
+    return _unique(state_label(r) for r in rows if r["division"] in divisions)
+
+
+def build_selection(
+    rows: list[dict], regions: list[str], divisions: list[str], states: list[str]
+) -> list[dict]:
+    """One full-path dict per selected state, kept only if its region and division are selected too."""
+    return [
+        dict(r)
+        for r in rows
+        if r["region"] in regions and r["division"] in divisions and state_label(r) in states
+    ]
+
+
+def in_clause(selection: list[dict]) -> str:
+    """Build the Census API in= clause from selected states, or '' when nothing is selected."""
+    fips = _unique(r["state_fips"] for r in selection)
+    return f"in=state:{','.join(fips)}" if fips else ""

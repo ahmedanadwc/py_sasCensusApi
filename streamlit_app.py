@@ -25,6 +25,8 @@ from py_sascensusapi.config import (
 )
 from py_sascensusapi.sas_backend import sas_backend
 from py_sascensusapi.census_catalog import search_datasets
+from py_sascensusapi.geo_lookup import in_clause
+from py_sascensusapi.geo_selector_dialog import geo_selector_dialog
 
 # Page Configuration
 st.set_page_config(
@@ -335,6 +337,14 @@ def find_step3_tables(ds_unique_id: str) -> dict[str, str]:
                 found[label] = name
                 break
     return found
+
+#--------------------------------------------------------------------------------------------------
+# Define a function to push the dialog's geography selection into the Step 3.2 in= clause
+#--------------------------------------------------------------------------------------------------
+def apply_geo_selection(selection: list[dict]) -> None:
+    """Set the in= clause for the selected dataset from the chosen states (state FIPS codes)."""
+    uid_key = str(st.session_state.get("selected_ds_unique_id", ""))
+    st.session_state.step3_query_fields.setdefault(uid_key, {})["in"] = in_clause(selection)
 
 #--------------------------------------------------------------------------------------------------
 # Define helpers to turn grid selections into a comma delimited list of Name values
@@ -1035,6 +1045,16 @@ with card:
                 help="Populated from the Variables grid selection or the selected sample query",
                 height=90,
             )
+            geo_btn_col, geo_info_col = st.columns([1, 3])
+            with geo_btn_col:
+                if st.button("🌎 Select Geography", key="step3_geo_btn"):
+                    geo_selector_dialog(apply_geo_selection)
+            with geo_info_col:
+                geo_sel = st.session_state.get("geo_selection") or []
+                if geo_sel:
+                    st.caption(
+                        f"{len(geo_sel)} state(s): " + ", ".join(r["state_abbrev"] for r in geo_sel)
+                    )
             col_for, col_in = st.columns(2)
             with col_for:
                 for_default = q_fields.get("for", "for=zip code tabulation area (3 digit) (or part):*")
