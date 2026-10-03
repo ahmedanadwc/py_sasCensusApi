@@ -1,6 +1,7 @@
 from functools import cache
 from pathlib import Path
 import ast
+from urllib.parse import unquote
 
 import pandas as pd
 
@@ -17,7 +18,7 @@ def _load_function(name):
         for node in tree.body
         if isinstance(node, ast.FunctionDef) and node.name == name
     )
-    namespace = {"pd": pd}
+    namespace = {"pd": pd, "unquote": unquote}
     exec(compile(ast.Module(body=[function], type_ignores=[]), str(APP_PATH), "exec"), namespace)
     return namespace[name]
 
@@ -112,5 +113,25 @@ def test_selected_rows_to_list_accepts_dataframe_list_and_none():
 def test_variables_grid_uses_multiple_selection_and_feeds_get_clause():
     source = APP_PATH.read_text(encoding="utf-8")
     assert 'selection_mode="multiple"' in source
-    assert 'value=f"get={vars_csv}"' in source
+    assert 'get_default = q_fields.get("get", "get=")' in source
     assert "P010014,P010015" not in source
+
+
+def test_parse_example_url_splits_clauses():
+    parse_example_url = _load_function("parse_example_url")
+    parsed = parse_example_url(
+        "https://api.census.gov/data/2000/dec/sf1?get=P001001,NAME&for=county:*&in=state:09&key=abc"
+    )
+    assert parsed == {
+        "base_url": "https://api.census.gov/data/2000/dec/sf1?",
+        "get": "get=P001001,NAME",
+        "for": "for=county:*",
+        "in": "in=state:09",
+    }
+
+
+def test_parse_example_url_handles_missing_and_multiple_in_clauses():
+    parse_example_url = _load_function("parse_example_url")
+    parsed = parse_example_url("https://x.test/data?get=A&for=tract:*&in=state:06&in=county:037")
+    assert parsed["in"] == "in=state:06&in=county:037"
+    assert parse_example_url("https://x.test/data?get=A")["for"] == ""

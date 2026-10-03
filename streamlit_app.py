@@ -4,6 +4,7 @@ import hashlib
 import re
 import sys
 from pathlib import Path
+from urllib.parse import unquote
 
 # Ensure 'src' is in sys.path so py_sascensusapi can be imported without pip install -e .
 SRC_DIR = Path(__file__).resolve().parent / "src"
@@ -147,6 +148,10 @@ if "step3_result" not in st.session_state:
     st.session_state.step3_result = None
 if "step3_selected_vars" not in st.session_state:
     st.session_state.step3_selected_vars = {}
+if "step3_query_fields" not in st.session_state:
+    st.session_state.step3_query_fields = {}
+if "step3_last_example" not in st.session_state:
+    st.session_state.step3_last_example = {}
 if "step3_vars_grid_gen" not in st.session_state:
     st.session_state.step3_vars_grid_gen = 0
 if "step3_result2" not in st.session_state:
@@ -354,6 +359,29 @@ def names_to_csv(rows: list[dict], column: str = "Name") -> str:
         if value and value not in names:
             names.append(value)
     return ",".join(names)
+
+#--------------------------------------------------------------------------------------------------
+# Define a function to split a sample Census API URL into the Step 3 query form fields
+#--------------------------------------------------------------------------------------------------
+def parse_example_url(url: str) -> dict[str, str]:
+    """Split an in_exampleURL value into base_url, get, for and in clauses (clauses keep their `name=` prefix).
+
+    Multiple in= parameters are joined with "&"; key= and any other parameters are ignored.
+    """
+    base, _, query = str(url).strip().partition("?")
+    parsed = {"base_url": f"{base}?" if base else "", "get": "", "for": "", "in": ""}
+    in_clauses: list[str] = []
+    for part in query.split("&"):
+        name, _, value = part.partition("=")
+        name, value = name.strip().lower(), unquote(value.strip())
+        if name == "get":
+            parsed["get"] = f"get={value}"
+        elif name == "for":
+            parsed["for"] = f"for={value}"
+        elif name == "in":
+            in_clauses.append(f"in={value}")
+    parsed["in"] = "&".join(in_clauses)
+    return parsed
 
 #--------------------------------------------------------------------------------------------------
 # Define a function to display a DataFrame in an AgGrid (optionally with row selection)
@@ -937,13 +965,38 @@ with card:
                             )
                             picked = selected_rows_to_list(grid_res.get("selected_rows", None))
                             if picked:
-                                st.session_state.step3_selected_vars[uid_key] = names_to_csv(picked).split(",")
+                                names = names_to_csv(picked).split(",")
+                                if names != st.session_state.step3_selected_vars.get(uid_key):
+                                    st.session_state.step3_selected_vars[uid_key] = names
+                                    st.session_state.step3_query_fields.setdefault(uid_key, {})["get"] = "get=" + ",".join(names)
                             n_sel = len(st.session_state.step3_selected_vars.get(uid_key, []))
                             st.caption(f"{n_sel} variable(s) selected - they populate `get=` in the query builder below.")
                             if n_sel and st.button("Clear selected variables", key="step3_clear_vars"):
                                 st.session_state.step3_selected_vars[uid_key] = []
+                                st.session_state.step3_query_fields.setdefault(uid_key, {})["get"] = "get="
                                 st.session_state.step3_vars_grid_gen += 1
                                 st.rerun()
+                        elif label == "Sample Queries":
+                            url_col = next((c for c in df.columns if str(c).lower() == "in_exampleurl"), None)
+                            uid_key = str(st.session_state.get("selected_ds_unique_id", ""))
+                            last_url = st.session_state.step3_last_example.get(uid_key)
+                            pre = [i for i, u in enumerate(df[url_col]) if str(u) == last_url] if url_col and last_url else []
+                            grid_res = render_grid(
+                                df,
+                                key=f"data-grid-step3-{label}",
+                                selection_mode="single",
+                                pre_selected_rows=pre,
+                            )
+                            picked = selected_rows_to_list(grid_res.get("selected_rows", None))
+                            if picked and url_col:
+                                url = str(picked[0].get(url_col, "") or "").strip()
+                                if url and url != last_url:
+                                    parsed = parse_example_url(url)
+                                    fields = st.session_state.step3_query_fields.setdefault(uid_key, {})
+                                    fields.update({k: v for k, v in parsed.items() if k != "base_url" or v})
+                                    st.session_state.step3_last_example[uid_key] = url
+                                    st.rerun()
+                            st.caption("Select a sample query to fill the base URL, get=, for= and in= fields below.")
                         else:
                             render_grid(df, key=f"data-grid-step3-{label}")
 
@@ -957,35 +1010,43 @@ with card:
         with st.form("step3_form2"):
             # Keys include the selected row so the fields reset when a different dataset is picked in Step 2
             row_key = st.session_state.get("selected_row_id", "none")
-            base_url_default = selected_row_value("BaseURL").strip()
+            q_fields = st.session_state.step3_query_fields.get(str(st.session_state.get("selected_ds_unique_id", "")), {})
+
+            def field_key(name: str, value: str) -> str:
+                # Changing the default (new example/selection) gives the widget a new key so it refreshes
+                return f"step3_{name}_{row_key}_{hashlib.md5(value.encode()).hexdigest()[:8]}"
+
+            base_url_default = (q_fields.get("base_url") or selected_row_value("BaseURL")).strip()
             if base_url_default and not base_url_default.endswith("?"):
                 base_url_default += "?"
             p_apiBaseURL = st.text_input(
                 "API Base URL (p_apiBaseURL)",
                 value=base_url_default,
-                key=f"step3_base_url_{row_key}",
-                help="BaseURL of the dataset row selected in Step 2",
+                key=field_key("base_url", base_url_default),
+                help="BaseURL of the dataset row selected in Step 2, or of the selected sample query",
             )
-            vars_csv = ",".join(
-                st.session_state.step3_selected_vars.get(str(st.session_state.get("selected_ds_unique_id", "")), [])
-            )
+            get_default = q_fields.get("get", "get=")
             p_apiGetClause = st.text_area(
                 "get= Variables Clause (p_apiGetClause)",
-                value=f"get={vars_csv}",
-                key=f"step3_get_{row_key}_{hashlib.md5(vars_csv.encode()).hexdigest()[:8]}",
-                help="Populated from the rows selected in the Variables grid above",
+                value=get_default,
+                key=field_key("get", get_default),
+                help="Populated from the Variables grid selection or the selected sample query",
                 height=90,
             )
             col_for, col_in = st.columns(2)
             with col_for:
+                for_default = q_fields.get("for", "for=zip code tabulation area (3 digit) (or part):*")
                 p_apiForClause = st.text_input(
                     "for= Geography Clause (p_apiForClause)",
-                    value="for=zip code tabulation area (3 digit) (or part):*",
+                    value=for_default,
+                    key=field_key("for", for_default),
                 )
             with col_in:
+                in_default = q_fields.get("in", "in=state:09,23,25,33,44,50")
                 p_apiInClause = st.text_input(
                     "in= Geography Filter Clause (p_apiInClause)",
-                    value="in=state:09,23,25,33,44,50",
+                    value=in_default,
+                    key=field_key("in", in_default),
                 )
 
             col_uid, col_outds = st.columns(2)
