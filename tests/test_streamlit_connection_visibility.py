@@ -2,22 +2,28 @@ from functools import cache
 from pathlib import Path
 import ast
 
+import pandas as pd
+
 
 APP_PATH = Path(__file__).parents[1] / "streamlit_app.py"
 
 
 @cache
-def _load_highest_unlocked_step():
+def _load_function(name):
     source = APP_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source)
     function = next(
         node
         for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "highest_unlocked_step"
+        if isinstance(node, ast.FunctionDef) and node.name == name
     )
-    namespace = {}
+    namespace = {"pd": pd}
     exec(compile(ast.Module(body=[function], type_ignores=[]), str(APP_PATH), "exec"), namespace)
-    return namespace["highest_unlocked_step"]
+    return namespace[name]
+
+
+def _load_highest_unlocked_step():
+    return _load_function("highest_unlocked_step")
 
 
 def test_environment_section_uses_backend_connection_state():
@@ -87,3 +93,24 @@ def test_step2_reuses_persisted_selection_when_grid_returns_no_selection():
     assert 'selected_row = normalize_selected_row(grid_res.get("selected_rows", None))' in source
     assert 'if selected_row is None:\n                    selected_row = persisted_row' in source
     assert 'pre_selected_rows=(' in source
+
+
+def test_names_to_csv_joins_selected_name_values():
+    names_to_csv = _load_function("names_to_csv")
+    rows = [{"Name": "P010014", "Label": "x"}, {"Name": " P010015 "}, {"name": "NAME"}, {"Name": "P010014"}, {"Name": ""}]
+    assert names_to_csv(rows) == "P010014,P010015,NAME"
+    assert names_to_csv([]) == ""
+
+
+def test_selected_rows_to_list_accepts_dataframe_list_and_none():
+    selected_rows_to_list = _load_function("selected_rows_to_list")
+    assert selected_rows_to_list(None) == []
+    assert selected_rows_to_list(pd.DataFrame({"Name": ["A", "B"]})) == [{"Name": "A"}, {"Name": "B"}]
+    assert selected_rows_to_list([{"Name": "A"}]) == [{"Name": "A"}]
+
+
+def test_variables_grid_uses_multiple_selection_and_feeds_get_clause():
+    source = APP_PATH.read_text(encoding="utf-8")
+    assert 'selection_mode="multiple"' in source
+    assert 'value=f"get={vars_csv}"' in source
+    assert "P010014,P010015" not in source

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -144,6 +145,10 @@ if "step2_result" not in st.session_state:
     st.session_state.step2_result = None
 if "step3_result" not in st.session_state:
     st.session_state.step3_result = None
+if "step3_selected_vars" not in st.session_state:
+    st.session_state.step3_selected_vars = {}
+if "step3_vars_grid_gen" not in st.session_state:
+    st.session_state.step3_vars_grid_gen = 0
 if "step3_result2" not in st.session_state:
     st.session_state.step3_result2 = None
 
@@ -327,12 +332,48 @@ def find_step3_tables(ds_unique_id: str) -> dict[str, str]:
     return found
 
 #--------------------------------------------------------------------------------------------------
-# Define a function to display a DataFrame in a read-only AgGrid
+# Define helpers to turn grid selections into a comma delimited list of Name values
 #--------------------------------------------------------------------------------------------------
-def render_grid(df: pd.DataFrame, key: str, height: int = 450) -> None:
-    """Show a DataFrame in an AgGrid sized to its cell contents."""
+def selected_rows_to_list(selected_rows) -> list[dict]:
+    """Normalize an AgGrid selected_rows value (DataFrame, list or None) to a list of dicts."""
+    if selected_rows is None:
+        return []
+    if isinstance(selected_rows, pd.DataFrame):
+        return selected_rows.to_dict("records")
+    if isinstance(selected_rows, dict):
+        return [selected_rows]
+    return list(selected_rows)
+
+
+def names_to_csv(rows: list[dict], column: str = "Name") -> str:
+    """Join the (case-insensitive) `column` values of the selected rows into a comma delimited string."""
+    names: list[str] = []
+    for row in rows:
+        key = next((k for k in row if str(k).lower() == column.lower()), None)
+        value = "" if key is None or row[key] is None else str(row[key]).strip()
+        if value and value not in names:
+            names.append(value)
+    return ",".join(names)
+
+#--------------------------------------------------------------------------------------------------
+# Define a function to display a DataFrame in an AgGrid (optionally with row selection)
+#--------------------------------------------------------------------------------------------------
+def render_grid(
+    df: pd.DataFrame,
+    key: str,
+    height: int = 450,
+    selection_mode: str | None = None,
+    pre_selected_rows: list[int] | None = None,
+):
+    """Show a DataFrame in an AgGrid sized to its cell contents; returns the AgGrid result."""
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_default_column(filter=True, sortable=True, resizable=True)
+    if selection_mode:
+        gb.configure_selection(
+            selection_mode=selection_mode,
+            use_checkbox=True,
+            pre_selected_rows=pre_selected_rows or [],
+        )
     auto_size_columns = JsCode(
         """
         function(params) {
@@ -352,13 +393,15 @@ def render_grid(df: pd.DataFrame, key: str, height: int = 450) -> None:
     # Grids in inactive tabs are hidden (zero width) when they first render, so the
     # initial autosize measures nothing; re-run it when the grid becomes visible.
     grid_options["onGridSizeChanged"] = auto_size_columns
-    AgGrid(
+    extra = {"update_on": ["selectionChanged"]} if selection_mode else {}
+    return AgGrid(
         df,
         gridOptions=grid_options,
         height=height,
         fit_columns_on_grid_load=False,
         allow_unsafe_jscode=True,
         key=key,
+        **extra,
     )
 
 # ------------------------------------ End Utility Functions ------------------------------------
@@ -880,7 +923,29 @@ with card:
                         st.info(f"Table `{STEP3_LIBREF}.{table}` has no rows.")
                     else:
                         st.caption(f"`{STEP3_LIBREF}.{table}` — {len(df)} rows, {len(df.columns)} columns")
-                        render_grid(df, key=f"data-grid-step3-{label}")
+                        if label == "Variables":
+                            name_col = next((c for c in df.columns if str(c).lower() == "name"), None)
+                            uid_key = str(st.session_state.get("selected_ds_unique_id", ""))
+                            chosen = st.session_state.step3_selected_vars.get(uid_key, [])
+                            pre = [i for i, n in enumerate(df[name_col]) if str(n).strip() in chosen] if name_col else []
+                            gen = st.session_state.step3_vars_grid_gen
+                            grid_res = render_grid(
+                                df,
+                                key=f"data-grid-step3-{label}-{gen}",
+                                selection_mode="multiple",
+                                pre_selected_rows=pre,
+                            )
+                            picked = selected_rows_to_list(grid_res.get("selected_rows", None))
+                            if picked:
+                                st.session_state.step3_selected_vars[uid_key] = names_to_csv(picked).split(",")
+                            n_sel = len(st.session_state.step3_selected_vars.get(uid_key, []))
+                            st.caption(f"{n_sel} variable(s) selected - they populate `get=` in the query builder below.")
+                            if n_sel and st.button("Clear selected variables", key="step3_clear_vars"):
+                                st.session_state.step3_selected_vars[uid_key] = []
+                                st.session_state.step3_vars_grid_gen += 1
+                                st.rerun()
+                        else:
+                            render_grid(df, key=f"data-grid-step3-{label}")
 
             if st.button("🔄 Refresh tables from SAS (bypass cache)", key="step3_refresh"):
                 for label, (table, _) in tables.items():
@@ -901,9 +966,14 @@ with card:
                 key=f"step3_base_url_{row_key}",
                 help="BaseURL of the dataset row selected in Step 2",
             )
+            vars_csv = ",".join(
+                st.session_state.step3_selected_vars.get(str(st.session_state.get("selected_ds_unique_id", "")), [])
+            )
             p_apiGetClause = st.text_area(
                 "get= Variables Clause (p_apiGetClause)",
-                value="get=P010014,P010015,P010010,P010011,P010012,P010013,P010003,NAME",
+                value=f"get={vars_csv}",
+                key=f"step3_get_{row_key}_{hashlib.md5(vars_csv.encode()).hexdigest()[:8]}",
+                help="Populated from the rows selected in the Variables grid above",
                 height=90,
             )
             col_for, col_in = st.columns(2)
