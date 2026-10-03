@@ -834,12 +834,13 @@ with card:
         # ------------------------------
         # Display form for Step 3 inputs (full width, fields in two columns)
         # ------------------------------
-        with st.form("step3_form"):
+        # Plain container (not st.form) so every edit reruns the script and refreshes the code preview
+        with st.container():
             s3_f1_left, s3_f1_right = st.columns(2)
             with s3_f1_left:
                 p_apiListingLibName = st.text_input("Catalog Libname (p_apiListingLibName)", value=DEFAULT_OUT_LIB)
                 p_apiListingDsName = st.text_input("Catalog Dataset Name (p_apiListingDsName)", value=DEFAULT_OUT_DS)
-                submit_step3_1 = st.form_submit_button("▶ Submit & Run in SAS", type="primary")
+                submit_step3_1 = st.button("▶ Submit & Run in SAS", type="primary", key="step3_submit1")
             with s3_f1_right:
                 selected_row_id = st.session_state.get("selected_row_id", 3)
                 # Key on the selected row so the field resets when a different dataset is picked in Step 2
@@ -1007,7 +1008,8 @@ with card:
 
         st.markdown("---")
 
-        with st.form("step3_form2"):
+        # Plain container (not st.form) so every edit reruns the script and refreshes the code preview
+        with st.container():
             # Keys include the selected row so the fields reset when a different dataset is picked in Step 2
             row_key = st.session_state.get("selected_row_id", "none")
             q_fields = st.session_state.step3_query_fields.get(str(st.session_state.get("selected_ds_unique_id", "")), {})
@@ -1069,7 +1071,7 @@ with card:
             with col_keyref:
                 p_dataApiKey = st.text_input("Census API Key Reference (p_dataApiKey)", value="&g_apiKey")
 
-            submit_step3_2 = st.form_submit_button("▶ Submit & Run in SAS", type="primary")
+            submit_step3_2 = st.button("▶ Submit & Run in SAS", type="primary", key="step3_submit2")
 
         # -----------------------------------------------
         # Display the results of submitting the 2nd form
