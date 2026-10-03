@@ -130,8 +130,6 @@ st.markdown(
 # Initialize Session State
 if "step" not in st.session_state:
     st.session_state.step = 0
-if "picked_endpoint" not in st.session_state:
-    st.session_state.picked_endpoint = "https://api.census.gov/data/2000/dec/sf1?"
 if "endpoint_selected" not in st.session_state:
     st.session_state.endpoint_selected = False
 if "sas_connected" not in st.session_state:
@@ -146,16 +144,14 @@ if "step2_result" not in st.session_state:
     st.session_state.step2_result = None
 if "step3_result" not in st.session_state:
     st.session_state.step3_result = None
-if "step5_result" not in st.session_state:
-    st.session_state.step5_result = None
+if "step3_result2" not in st.session_state:
+    st.session_state.step3_result2 = None
 
 # Step Metadata Definition
 STEPS = [
     {"short": "Connect", "full": "🔌 SAS Session", "desc": "Connection & Macro Autocall Setup"},
     {"short": "Catalog", "full": "📂 Collect All Datasets", "desc": "Download & Parse Full Inventory"},
-    {"short": "Profile", "full": "🔍 Dataset Info", "desc": "Metadata & Geography Profile"},
-    {"short": "Search", "full": "🔎 Catalog Quick-Lookup", "desc": "Interactive Search & Endpoint Picker"},
-    {"short": "Query", "full": "📊 Query Builder", "desc": "Chunked Census Data API Query"},
+    {"short": "Profile & Query", "full": "🔍 Dataset Info & 📊 Query Builder", "desc": "Metadata & Geography Profile & Chunked Census Data API Query"},
 ]
 
 # ------------------------------------ Utility Functions ------------------------------------
@@ -172,9 +168,6 @@ def set_step(idx: int):
 def highest_unlocked_step(
     sas_connected: bool,
     step2_result: dict | None,
-    step3_result: dict | None,
-    endpoint_selected: bool,
-    picked_endpoint: str,
 ) -> int:
     def result_succeeded(result: dict | None) -> bool:
         return (
@@ -187,11 +180,7 @@ def highest_unlocked_step(
         return 0
     if not result_succeeded(step2_result):
         return 1
-    if not result_succeeded(step3_result):
-        return 2
-    if not endpoint_selected:
-        return 3
-    return 4
+    return 2
 
 # -----------------------------------------------------------------------------------
 # Define a function to extract SAS_config_names from a specified configuration file
@@ -246,6 +235,17 @@ def extract_sas_config_names(config_path: str) -> list[str]:
 
 #------------------------------------------------------------------------------------
 # Define a helper function to normalize a selected row from AgGrid into a dictionary
+#--------------------------------------------------------------------------------------------------
+# Define a function to read a column value from the selected Step 2 row (case-insensitive)
+#--------------------------------------------------------------------------------------------------
+def selected_row_value(column: str, default: str = "") -> str:
+    """Return the selected catalog row's value for a column, or default if unset/missing."""
+    row = st.session_state.get("selected_row") or {}
+    for name, value in row.items():
+        if str(name).lower() == column.lower():
+            return default if value is None or pd.isna(value) else str(value)
+    return default
+
 #------------------------------------------------------------------------------------
 def normalize_selected_row(selected_rows) -> dict | None:
     """Return the first selected AgGrid row as a dictionary."""
@@ -369,10 +369,8 @@ def render_grid(df: pd.DataFrame, key: str, height: int = 450) -> None:
 unlocked_step = highest_unlocked_step(
     sas_backend.is_connected,
     st.session_state.step2_result,
-    st.session_state.step3_result,
-    st.session_state.endpoint_selected,
-    st.session_state.picked_endpoint,
 )
+
 with st.sidebar:
     st.markdown("### 🏛️ Wizard Navigator")
     for i, s in enumerate(STEPS):
@@ -397,7 +395,6 @@ with st.sidebar:
 
     st.markdown("---")
     st.caption(f"📁 **Root**: `{SAS_PROJECT_ROOT.name}`")
-    st.caption(f"🔗 **Target**: `{st.session_state.picked_endpoint[:38]}...`")
 
 # -----------------------------------------------------------------------------
 # Header Banner
@@ -453,8 +450,8 @@ with card:
         st.markdown("")
 
         # Connection controls
-        col_conCtrls, col_init = st.columns([1, 1])
-        with col_conCtrls:
+        s1_col_l, s1_col_r = st.columns([1, 1])
+        with s1_col_l:
             cfgfile_input = st.text_input(
                 "Custom sascfg File Path (cfgfile)",
                 value=DEFAULT_SAS_CFGFILE,
@@ -498,7 +495,7 @@ with card:
             # -----------------------------------------------------------------
             # Initialise SAS Autocall & libnames (still inside the guard)
             # -----------------------------------------------------------------
-            with col_init:
+            with s1_col_r:
                 st.markdown("#### ⚙️ Session Environment Parameters")
 
                 proj_path_input = st.text_input(
@@ -547,10 +544,10 @@ with card:
 
         st.markdown("---")
 
-        col_tip, col_next = st.columns([3, 1])
-        with col_tip:
+        s1_col_tip, s1_col_next = st.columns([3, 1])
+        with s1_col_tip:
             st.caption("💡 *Tip: If running offline without SAS, you can still configure parameters and download SAS scripts in subsequent steps.*")
-        with col_next:
+        with s1_col_next:
             if st.button("Next: Collect Dataset Catalog >", type="primary", use_container_width=True):
                 if unlocked_step >= 1:
                     set_step(1)
@@ -568,11 +565,11 @@ with card:
         # Display form for Step 2 inputs (full width, fields in two columns)
         # ------------------------------
         with st.form("step2_form"):
-            f2_left, f2_right = st.columns(2)
-            with f2_left:
+            s2_f_left, s2_f_right = st.columns(2)
+            with s2_f_left:
                 p_outLibName = st.text_input("Output SAS Library (p_outLibName)", value=DEFAULT_OUT_LIB)
                 p_dataJsonURL = st.text_input("Census Catalog JSON URL (p_dataJsonURL)", value=DEFAULT_DATA_JSON_URL)
-            with f2_right:
+            with s2_f_right:
                 p_outDsName = st.text_input("Output Dataset Name (p_outDsName)", value=DEFAULT_OUT_DS)
                 p_reportOutputPath = st.text_input("Report Output Path (p_reportOutputPath)", value="&g_outputRoot")
             submit_step2 = st.form_submit_button("▶ Submit & Run in SAS", type="primary")
@@ -746,31 +743,36 @@ with card:
             if st.button("< Back: SAS Connection", use_container_width=True):
                 set_step(0)
         with s2_col_next:
-            if st.button("Next: Dataset Profile >", type="primary", use_container_width=True):
+            if st.button("Next: Dataset Profile & Query Builder>", type="primary", use_container_width=True):
                 if unlocked_step >= 2:
                     set_step(2)
 
     # -------------------------------------------------------------------------
     # STEP 3: Dataset Profile & Metadata (%censusapi_getDsFullInfo)
+    #       : & Data API Query Builder (%censusapi_submitDataApiQuery)
     # -------------------------------------------------------------------------
     elif st.session_state.step == 2:
-        st.markdown("### 🔍 Step 3: Dataset Profile & Metadata (%censusapi_getDsFullInfo)")
+        st.markdown("### 🔍& 📊 Step 3: Dataset Info (%censusapi_getDsFullInfo) & Data API Query Builder (%censusapi_submitDataApiQuery)")
         st.markdown(
             "Pulls complete metadata for a specific dataset row from `_API_ALL_DATA`, including all supported variables, "
             "valid geography levels, and sample API queries into individual SAS tables and an Excel report."
+            "Submits requests to the Census Data API, automatically splitting large variable lists into chunks "
+            "(up to `p_maxVarCount` variables per call), parsing JSON responses into SAS datasets, and merging the chunks."
         )
 
         # ------------------------------
         # Display form for Step 3 inputs (full width, fields in two columns)
         # ------------------------------
         with st.form("step3_form"):
-            f3_left, f3_right = st.columns(2)
-            with f3_left:
+            s3_f1_left, s3_f1_right = st.columns(2)
+            with s3_f1_left:
                 p_apiListingLibName = st.text_input("Catalog Libname (p_apiListingLibName)", value=DEFAULT_OUT_LIB)
                 p_apiListingDsName = st.text_input("Catalog Dataset Name (p_apiListingDsName)", value=DEFAULT_OUT_DS)
-                submit_step3 = st.form_submit_button("▶ Submit & Run in SAS", type="primary")
-            with f3_right:
-                p_dsRowId = st.text_input("Dataset _ROWID_ (p_dsRowId)", value=f"{st.session_state.get("selected_row_id", 3)}", key="step3_row_id")
+                submit_step3_1 = st.form_submit_button("▶ Submit & Run in SAS", type="primary")
+            with s3_f1_right:
+                selected_row_id = st.session_state.get("selected_row_id", 3)
+                # Key on the selected row so the field resets when a different dataset is picked in Step 2
+                p_dsRowId = st.text_input("Dataset _ROWID_ (p_dsRowId)", value=f"{selected_row_id}", key=f"step3_row_id_{selected_row_id}")
                 p_reportOutputPath = st.text_input("Report Output Path (p_reportOutputPath)", value="&g_outputRoot", key="step3_out_path")
                 reuse_step3 = st.checkbox(
                     "Reuse existing profile tables (skip the SAS macro if all four exist)", value=True, key="step3_reuse"
@@ -782,7 +784,7 @@ with card:
         s3_col_l, s3_col_r = st.columns(2)
 
         with s3_col_l:
-            sas_code_step3 = f"""/* Step 3: Compose complete Profile of the specified dataset */
+            sas_code_step3_1 = f"""/* Step 3.1: Compose complete Profile of the specified dataset */
     %censusapi_getDsFullInfo(
         p_apiListingLibName={p_apiListingLibName}
     , p_apiListingDsName={p_apiListingDsName}
@@ -790,7 +792,7 @@ with card:
     , p_reportOutputPath={p_reportOutputPath}
     );
     """
-            if submit_step3:
+            if submit_step3_1:
                 if not sas_backend.is_connected:
                     st.warning("⚠️ **SAS is not connected.** Return to Step 1 and connect via SASPy first.")
                 else:
@@ -804,7 +806,7 @@ with card:
                         found = existing
                     else:
                         with st.spinner("Running %censusapi_getDsFullInfo in SAS..."):
-                            res = sas_backend.submit_code(sas_code_step3)
+                            res = sas_backend.submit_code(sas_code_step3_1)
                             found = find_step3_tables(uid) if res["success"] else {}
                     with st.spinner("Loading profile tables..."):
                         tables = {
@@ -843,7 +845,7 @@ with card:
             if st.session_state.step3_result:
                 r = st.session_state.step3_result["res"]
                 if r["success"]:
-                    st.success("✅ **Step 3 Profile executed successfully!** (0 SAS errors)")
+                    st.success("✅ **Step 3.1 Profile executed successfully!** (0 SAS errors)")
                 else:
                     st.error(f"❌ **Execution finished with errors** ({len(r.get('errors', []))} error lines found)")
 
@@ -852,11 +854,10 @@ with card:
 
         with s3_col_r:
             with st.expander("📝 Generated SAS Code Preview", expanded=False):
-                st.code(sas_code_step3, language="sas")
-
+                st.code(sas_code_step3_1, language="sas")
                 st.download_button(
                     label="💾 Download .sas Script",
-                    data=sas_code_step3.encode("utf-8"),
+                    data=sas_code_step3_1.encode("utf-8"),
                     file_name="step3_getDsFullInfo.sas",
                     mime="text/plain",
                 )
@@ -888,103 +889,17 @@ with card:
 
         st.markdown("---")
 
-        s3_col_back, s3_col_next = st.columns([1, 1])
-        with s3_col_back:
-            if st.button("< Back: Collect Datasets", use_container_width=True):
-                set_step(1)
-        with s3_col_next:
-            if st.button("Next: Search Catalog >", type="primary", use_container_width=True):
-                if unlocked_step >= 3:
-                    set_step(3)
-
-    # -------------------------------------------------------------------------
-    # STEP 4: Interactive Census Catalog Quick-Lookup
-    # -------------------------------------------------------------------------
-    elif st.session_state.step == 3:
-        st.markdown("### 🔎 Step 4: Interactive Census Catalog Quick-Lookup")
-        st.markdown(
-            "Search the Census API catalog to find the exact base URL endpoint for decennial censuses, ACS, or CPS. "
-            "Selecting an endpoint automatically configures Step 5."
-        )
-
-        col_q, col_yr, col_sbtn = st.columns([3, 1, 1])
-        with col_q:
-            search_query = st.text_input(
-                "🔎 Search Census Datasets (Keyword or Topic)",
-                value=st.session_state.get("step4_query", "sf1"),
-                placeholder="e.g. decennial, sf1, cps, acs5",
-                key="step4_query",
-            )
-        with col_yr:
-            year_val = st.selectbox(
-                "Vintage Year Filter",
-                options=["All", "2022", "2021", "2020", "2019", "2010", "2000"],
-                index=0,
-                key="step4_year",
-            )
-        with col_sbtn:
-            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-            run_search = st.button("Search Catalog", type="primary", use_container_width=True)
-
-        selected_yr = year_val if year_val != "All" else None
-        results = search_datasets(search_query, year=selected_yr, max_results=20)
-
-        endpoint_options = {}
-        for r in results:
-            if r.get("endpoint"):
-                label = f"[{r.get('vintage', 'N/A')}] {r.get('title', '')[:65]} ({r.get('dataset_name', '')})"
-                endpoint_options[label] = r.get("endpoint")
-
-        st.markdown("#### 🎯 Matching Endpoints:")
-        if endpoint_options:
-            selected_label = st.selectbox(
-                "Select Matched Endpoint",
-                options=list(endpoint_options.keys()),
-                key="step4_selected_label",
-            )
-            selected_url = endpoint_options.get(selected_label, "")
-            st.markdown(f"**Selected Endpoint**: `{selected_url}`")
-
-            if st.button("📋 Apply Endpoint to Step 5 Query Builder", type="primary", use_container_width=False):
-                st.session_state.picked_endpoint = selected_url
-                st.session_state.endpoint_selected = True
-                st.success(f"Applied: {selected_url}")
-                if highest_unlocked_step(
-                    sas_backend.is_connected,
-                    st.session_state.step2_result,
-                    st.session_state.step3_result,
-                    st.session_state.endpoint_selected,
-                    st.session_state.picked_endpoint,
-                ) >= 4:
-                    set_step(4)
-        else:
-            st.info("No endpoints matching your query. Enter a keyword above (e.g. 'sf1', 'acs5', 'dec') and click **Search Catalog**.")
-
-        st.markdown("---")
-        col_back, col_next = st.columns([1, 1])
-        with col_back:
-            if st.button("< Back: Dataset Profile", use_container_width=True):
-                set_step(2)
-        with col_next:
-            if st.button("Next: Query Builder >", type="primary", use_container_width=True):
-                if unlocked_step >= 4:
-                    set_step(4)
-
-    # -------------------------------------------------------------------------
-    # STEP 5: Build & Submit Data API Query (%censusapi_submitDataApiQuery)
-    # -------------------------------------------------------------------------
-    elif st.session_state.step == 4:
-        st.markdown("### 📊 Step 5: Build & Submit Data API Query (%censusapi_submitDataApiQuery)")
-        st.markdown(
-            "Submits requests to the Census Data API, automatically splitting large variable lists into chunks "
-            "(up to `p_maxVarCount` variables per call), parsing JSON responses into SAS datasets, and merging the chunks."
-        )
-
-        with st.form("step5_form"):
+        with st.form("step3_form2"):
+            # Keys include the selected row so the fields reset when a different dataset is picked in Step 2
+            row_key = st.session_state.get("selected_row_id", "none")
+            base_url_default = selected_row_value("BaseURL").strip()
+            if base_url_default and not base_url_default.endswith("?"):
+                base_url_default += "?"
             p_apiBaseURL = st.text_input(
                 "API Base URL (p_apiBaseURL)",
-                value=st.session_state.picked_endpoint,
-                help="Base endpoint URL configured from Step 4 or entered manually",
+                value=base_url_default,
+                key=f"step3_base_url_{row_key}",
+                help="BaseURL of the dataset row selected in Step 2",
             )
             p_apiGetClause = st.text_area(
                 "get= Variables Clause (p_apiGetClause)",
@@ -1005,7 +920,9 @@ with card:
 
             col_uid, col_outds = st.columns(2)
             with col_uid:
-                p_dsUniqueId = st.text_input("Dataset Unique ID (p_dsUniqueId)", value="_114_dec_2000")
+                p_dsUniqueId = st.text_input(
+                    "Dataset Unique ID (p_dsUniqueId)", value=selected_row_value("ds_unique_id"), key=f"step3_ds_uid_{row_key}"
+                )
             with col_outds:
                 p_outDsName = st.text_input("Output SAS Dataset (p_outDsName)", value="work.sf1_response")
 
@@ -1021,67 +938,74 @@ with card:
             with col_keyref:
                 p_dataApiKey = st.text_input("Census API Key Reference (p_dataApiKey)", value="&g_apiKey")
 
-            submit_step5 = st.form_submit_button("▶ Submit & Run in SAS", type="primary")
+            submit_step3_2 = st.form_submit_button("▶ Submit & Run in SAS", type="primary")
 
-        sas_code_step5 = f"""/* Step 5: Submit Census Data API Query with Variable Chunking */
-%censusapi_submitDataApiQuery(
-    p_apiBaseURL=%STR({p_apiBaseURL})
-  , p_apiGetClause=%STR({p_apiGetClause})
-  , p_apiForClause=%bquote({p_apiForClause})
-  , p_apiInClause=%bquote({p_apiInClause})
-  , p_dsUniqueId={p_dsUniqueId}
-  , p_outDsName={p_outDsName}
-  , p_dataApiKey={p_dataApiKey}
-  , p_maxVarCount={p_maxVarCount}
-);
-"""
-        if submit_step5:
-            if not sas_backend.is_connected:
-                st.warning("⚠️ **SAS is not connected.** Return to Step 1 and connect via SASPy first.")
-            else:
-                with st.spinner("Submitting chunked API queries via SAS macro..."):
-                    res = sas_backend.submit_code(sas_code_step5)
-                    df = None
-                    parts = p_outDsName.split(".")
-                    libref = parts[0] if len(parts) > 1 else "WORK"
-                    tbl = parts[1] if len(parts) > 1 else parts[0]
-                    if res["success"]:
-                        df = sas_backend.fetch_dataframe(tbl, libref)
-                    st.session_state.step5_result = {
-                        "res": res,
-                        "df": df,
-                        "ds_name": p_outDsName,
-                    }
+        # -----------------------------------------------
+        # Display the results of submitting the 2nd form
+        # -----------------------------------------------
+        s3_col_l2, s3_col_r2 = st.columns(2)
 
-        if st.session_state.step5_result:
-            r = st.session_state.step5_result["res"]
-            if r["success"]:
-                st.success("✅ **Step 5 Query executed successfully!** (0 SAS errors)")
-            else:
-                st.error(f"❌ **Query finished with errors** ({len(r.get('errors', []))} error lines found)")
+        with s3_col_l2:
+            sas_code_step3_2 = f"""/* Step 3.2: Submit Census Data API Query with Variable Chunking */
+    %censusapi_submitDataApiQuery(
+        p_apiBaseURL=%STR({p_apiBaseURL})
+    , p_apiGetClause=%STR({p_apiGetClause})
+    , p_apiForClause=%bquote({p_apiForClause})
+    , p_apiInClause=%bquote({p_apiInClause})
+    , p_dsUniqueId={p_dsUniqueId}
+    , p_outDsName={p_outDsName}
+    , p_dataApiKey={p_dataApiKey}
+    , p_maxVarCount={p_maxVarCount}
+    );
+    """
+            if submit_step3_2:
+                if not sas_backend.is_connected:
+                    st.warning("⚠️ **SAS is not connected.** Return to Step 1 and connect via SASPy first.")
+                else:
+                    with st.spinner("Submitting chunked API queries via SAS macro..."):
+                        res = sas_backend.submit_code(sas_code_step3_2)
+                        df = None
+                        parts = p_outDsName.split(".")
+                        libref = parts[0] if len(parts) > 1 else "WORK"
+                        tbl = parts[1] if len(parts) > 1 else parts[0]
+                        if res["success"]:
+                            df = sas_backend.fetch_dataframe(tbl, libref)
+                        st.session_state.step3_result2 = {
+                            "res": res,
+                            "df": df,
+                            "ds_name": p_outDsName,
+                        }
 
-            with st.expander(f"📋 SAS Log ({len(r.get('log', '').splitlines())} lines)", expanded=False):
-                st.code(r.get("log", ""), language="sas")
+            if st.session_state.step3_result2:
+                r = st.session_state.step3_result2["res"]
+                if r["success"]:
+                    st.success("✅ **Step 3.2 Query executed successfully!** (0 SAS errors)")
+                else:
+                    st.error(f"❌ **Query finished with errors** ({len(r.get('errors', []))} error lines found)")
 
-            df = st.session_state.step5_result.get("df")
-            if df is not None and not df.empty:
-                st.markdown(f"#### 📊 SAS Dataset Table: `{st.session_state.step5_result['ds_name']}` ({len(df)} rows, {len(df.columns)} columns)")
-                st.dataframe(df, use_container_width=True)
-            elif df is not None and df.empty:
-                st.info(f"ℹ️ Output table `{st.session_state.step5_result['ds_name']}` exists but is empty.")
+                with st.expander(f"📋 SAS Log ({len(r.get('log', '').splitlines())} lines)", expanded=False):
+                    st.code(r.get("log", ""), language="sas")
 
-        st.markdown("#### 📝 Generated SAS Code Preview:")
-        st.code(sas_code_step5, language="sas")
+                df = st.session_state.step3_result2.get("df")
+                if df is not None and not df.empty:
+                    st.markdown(f"#### 📊 SAS Dataset Table: `{st.session_state.step3_result2['ds_name']}` ({len(df)} rows, {len(df.columns)} columns)")
+                    st.dataframe(df, use_container_width=True)
+                elif df is not None and df.empty:
+                    st.info(f"ℹ️ Output table `{st.session_state.step3_result2['ds_name']}` exists but is empty.")
 
-        st.download_button(
-            label="💾 Download .sas Script",
-            data=sas_code_step5.encode("utf-8"),
-            file_name="step5_submitDataApiQuery.sas",
-            mime="text/plain",
-        )
+        with s3_col_r2:
+            with st.expander("📝 Generated SAS Code Preview", expanded=False):
+                st.code(sas_code_step3_2, language="sas")
+                st.download_button(
+                    label="💾 Download .sas Script",
+                    data=sas_code_step3_2.encode("utf-8"),
+                    file_name="step3_2_submitDataApiQuery.sas",
+                    mime="text/plain",
+                )
 
         st.markdown("---")
-        col_back, _ = st.columns([1, 1])
-        with col_back:
-            if st.button("< Back: Search Endpoints", use_container_width=True):
-                set_step(3)
+
+        s3_col_back, _ = st.columns([1, 1])
+        with s3_col_back:
+            if st.button("< Back: Collect Datasets", use_container_width=True):
+                set_step(1)
