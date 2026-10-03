@@ -54,33 +54,46 @@ def _unique(values) -> list[str]:
     return list(dict.fromkeys(values))
 
 
+def region_label(row: dict) -> str:
+    """Display label for a region option, e.g. 'Northeast (1)'."""
+    return f"{row['region']} ({row['region_id']})"
+
+
+def division_label(row: dict) -> str:
+    """Display label for a division option, e.g. 'New England (1)'."""
+    return f"{row['division']} ({row['division_id']})"
+
+
 def state_label(row: dict) -> str:
-    """Display label for a state option, e.g. 'Connecticut (CT)'."""
-    return f"{row['state']} ({row['state_abbrev']})"
+    """Display label for a state option, e.g. 'Connecticut - CT (09)'."""
+    return f"{row['state']} - {row['state_abbrev']} ({row['state_fips']})"
 
 
 def region_options(rows: list[dict]) -> list[str]:
-    return _unique(r["region"] for r in rows)
+    return _unique(region_label(r) for r in rows)
 
 
 def division_options(rows: list[dict], regions: list[str]) -> list[str]:
-    """Divisions that belong to any of the selected regions."""
-    return _unique(r["division"] for r in rows if r["region"] in regions)
+    """Division labels that belong to any of the selected region labels."""
+    return _unique(division_label(r) for r in rows if region_label(r) in regions)
 
 
 def state_options(rows: list[dict], divisions: list[str]) -> list[str]:
-    """State labels that belong to any of the selected divisions."""
-    return _unique(state_label(r) for r in rows if r["division"] in divisions)
+    """State labels that belong to any of the selected division labels."""
+    return _unique(state_label(r) for r in rows if division_label(r) in divisions)
 
 
 def build_selection(
     rows: list[dict], regions: list[str], divisions: list[str], states: list[str]
 ) -> list[dict]:
-    """One full-path dict per selected state, kept only if its region and division are selected too."""
+    """One full-path dict per selected state, kept only if its region and division are selected too.
+
+    `regions`, `divisions` and `states` are the display labels ('<Name> (key)').
+    """
     return [
         dict(r)
         for r in rows
-        if r["region"] in regions and r["division"] in divisions and state_label(r) in states
+        if region_label(r) in regions and division_label(r) in divisions and state_label(r) in states
     ]
 
 

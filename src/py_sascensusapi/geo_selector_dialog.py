@@ -8,63 +8,90 @@ import streamlit as st
 
 from py_sascensusapi.geo_lookup import (
     build_selection,
+    division_label,
     division_options,
     load_geo_rows,
+    region_label,
     region_options,
+    state_label,
     state_options,
 )
 
 REGIONS_KEY = "geo_dlg_regions"
 DIVISIONS_KEY = "geo_dlg_divisions"
 STATES_KEY = "geo_dlg_states"
+RESEED_KEY = "geo_dlg_reseed"
 
 
-def _prune(key: str, options: list[str]) -> None:
-    """Drop selected values that are no longer valid options (cascading reset)."""
+def _keep_valid(key: str, options: list[str]) -> None:
+    """Keep only the selected values of `key` that are still valid options."""
     st.session_state[key] = [v for v in st.session_state.get(key, []) if v in options]
 
 
-def _seed_from_selection(selection: list[dict]) -> None:
-    """Pre-fill the dialog from the last applied selection when it opens."""
-    if REGIONS_KEY in st.session_state:
+def cascade_from_regions() -> None:
+    """on_change for Regions: drop divisions, then states, whose parents are no longer selected."""
+    rows = load_geo_rows()
+    _keep_valid(DIVISIONS_KEY, division_options(rows, st.session_state.get(REGIONS_KEY, [])))
+    cascade_from_divisions()
+
+
+def cascade_from_divisions() -> None:
+    """on_change for Divisions: drop states whose division is no longer selected."""
+    rows = load_geo_rows()
+    _keep_valid(STATES_KEY, state_options(rows, st.session_state.get(DIVISIONS_KEY, [])))
+
+
+def seed_from_selection(selection: list[dict]) -> None:
+    """Pre-fill the widgets from the last applied selection (on first open and after Apply)."""
+    if REGIONS_KEY in st.session_state and not st.session_state.get(RESEED_KEY):
         return
-    st.session_state[REGIONS_KEY] = list(dict.fromkeys(r["region"] for r in selection))
-    st.session_state[DIVISIONS_KEY] = list(dict.fromkeys(r["division"] for r in selection))
-    st.session_state[STATES_KEY] = list(
-        dict.fromkeys(f"{r['state']} ({r['state_abbrev']})" for r in selection)
-    )
+    st.session_state[REGIONS_KEY] = list(dict.fromkeys(region_label(r) for r in selection))
+    st.session_state[DIVISIONS_KEY] = list(dict.fromkeys(division_label(r) for r in selection))
+    st.session_state[STATES_KEY] = list(dict.fromkeys(state_label(r) for r in selection))
+    st.session_state[RESEED_KEY] = False
+
+
+def render_geo_multiselects(rows: list[dict]) -> list[dict]:
+    """Render the three linked multiselects and return the selected full paths.
+
+    Removing a parent value (via the widget's x or Clear) immediately removes its children and
+    grandchildren through the on_change callbacks, so no orphaned selections remain.
+    """
+    col_region, col_division, col_state = st.columns(3)
+
+    with col_region:
+        regions = st.multiselect(
+            "Regions", region_options(rows), key=REGIONS_KEY, on_change=cascade_from_regions
+        )
+    with col_division:
+        divisions = st.multiselect(
+            "Divisions",
+            division_options(rows, regions),
+            key=DIVISIONS_KEY,
+            on_change=cascade_from_divisions,
+            disabled=not regions,
+        )
+    with col_state:
+        states = st.multiselect(
+            "States", state_options(rows, divisions), key=STATES_KEY, disabled=not divisions
+        )
+
+    # build_selection also requires each state's parents to be selected, as a final safeguard
+    return build_selection(rows, regions, divisions, states)
 
 
 @st.dialog("Select Geography", width="large")
 def geo_selector_dialog(on_apply: Callable[[list[dict]], None] | None = None) -> None:
     """Pick regions, then divisions, then states; Apply stores the full paths and reruns the app."""
     rows = load_geo_rows()
-    _seed_from_selection(st.session_state.get("geo_selection") or [])
+    seed_from_selection(st.session_state.get("geo_selection") or [])
 
-    col_region, col_division, col_state = st.columns(3)
-
-    with col_region:
-        regions_all = region_options(rows)
-        _prune(REGIONS_KEY, regions_all)
-        regions = st.multiselect("Regions", regions_all, key=REGIONS_KEY)
-
-    with col_division:
-        divisions_all = division_options(rows, regions)
-        _prune(DIVISIONS_KEY, divisions_all)
-        divisions = st.multiselect(
-            "Divisions", divisions_all, key=DIVISIONS_KEY, disabled=not regions
-        )
-
-    with col_state:
-        states_all = state_options(rows, divisions)
-        _prune(STATES_KEY, states_all)
-        states = st.multiselect("States", states_all, key=STATES_KEY, disabled=not divisions)
-
-    selection = build_selection(rows, regions, divisions, states)
+    selection = render_geo_multiselects(rows)
     st.caption(f"{len(selection)} state(s) selected")
 
     if st.button("Apply", type="primary", disabled=not selection, key="geo_dlg_apply"):
         st.session_state.geo_selection = selection
+        st.session_state[RESEED_KEY] = True
         if on_apply is not None:
             on_apply(selection)
         st.rerun()
