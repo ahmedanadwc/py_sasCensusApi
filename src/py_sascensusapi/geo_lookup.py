@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import streamlit as st
@@ -101,3 +102,41 @@ def in_clause(selection: list[dict]) -> str:
     """Build the Census API in= clause from selected states, or '' when nothing is selected."""
     fips = _unique(r["state_fips"] for r in selection)
     return f"in=state:{','.join(fips)}" if fips else ""
+
+
+_STATE_PART = re.compile(r"^(?:in=)?state:", re.IGNORECASE)
+
+
+def parse_state_fips(in_text: str) -> list[str]:
+    """Extract the state FIPS codes from an in= clause such as 'in=state:09,23' (['*'] for state:*).
+
+    Other in= parameters (county:..., etc.) are ignored; single digits are zero padded.
+    """
+    fips: list[str] = []
+    for part in str(in_text or "").split("&"):
+        part = part.strip()
+        if _STATE_PART.match(part):
+            for value in re.split(r"[,\s]+", part.split(":", 1)[1].strip()):
+                if value:
+                    fips.append(value if value == "*" else value.zfill(2))
+    return _unique(fips)
+
+
+def selection_from_in_clause(rows: list[dict], in_text: str) -> tuple[list[dict], list[str]]:
+    """Map the states in an in= clause to full-path rows; also return values not in the lookup."""
+    fips = parse_state_fips(in_text)
+    if "*" in fips:
+        return [dict(r) for r in rows], []
+    known = {r["state_fips"] for r in rows}
+    selection = [dict(r) for r in rows if r["state_fips"] in fips]
+    return selection, [f for f in fips if f not in known]
+
+
+def merge_in_clause(existing: str, selection: list[dict]) -> str:
+    """Replace the state part of an in= clause with the selection, keeping any other in= parts."""
+    others = [
+        p.strip()
+        for p in str(existing or "").split("&")
+        if p.strip() and not _STATE_PART.match(p.strip())
+    ]
+    return "&".join(part for part in [in_clause(selection), *others] if part)

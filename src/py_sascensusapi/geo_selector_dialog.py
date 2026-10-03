@@ -13,6 +13,7 @@ from py_sascensusapi.geo_lookup import (
     load_geo_rows,
     region_label,
     region_options,
+    selection_from_in_clause,
     state_label,
     state_options,
 )
@@ -21,6 +22,8 @@ REGIONS_KEY = "geo_dlg_regions"
 DIVISIONS_KEY = "geo_dlg_divisions"
 STATES_KEY = "geo_dlg_states"
 RESEED_KEY = "geo_dlg_reseed"
+INITIAL_KEY = "geo_dlg_initial"
+UNMATCHED_KEY = "geo_dlg_unmatched"
 
 
 def _keep_valid(key: str, options: list[str]) -> None:
@@ -42,7 +45,7 @@ def cascade_from_divisions() -> None:
 
 
 def seed_from_selection(selection: list[dict]) -> None:
-    """Pre-fill the widgets from the last applied selection (on first open and after Apply)."""
+    """Pre-fill the widgets from `selection` when the dialog is (re)opened."""
     if REGIONS_KEY in st.session_state and not st.session_state.get(RESEED_KEY):
         return
     st.session_state[REGIONS_KEY] = list(dict.fromkeys(region_label(r) for r in selection))
@@ -84,14 +87,30 @@ def render_geo_multiselects(rows: list[dict]) -> list[dict]:
 def geo_selector_dialog(on_apply: Callable[[list[dict]], None] | None = None) -> None:
     """Pick regions, then divisions, then states; Apply stores the full paths and reruns the app."""
     rows = load_geo_rows()
-    seed_from_selection(st.session_state.get("geo_selection") or [])
+    seed_from_selection(st.session_state.get(INITIAL_KEY) or [])
+
+    unmatched = st.session_state.get(UNMATCHED_KEY) or []
+    if unmatched:
+        st.warning(
+            "These in= values are not in the lookup and will be dropped on Apply: " + ", ".join(unmatched)
+        )
 
     selection = render_geo_multiselects(rows)
     st.caption(f"{len(selection)} state(s) selected")
 
     if st.button("Apply", type="primary", disabled=not selection, key="geo_dlg_apply"):
         st.session_state.geo_selection = selection
-        st.session_state[RESEED_KEY] = True
         if on_apply is not None:
             on_apply(selection)
         st.rerun()
+
+
+def open_geo_dialog(
+    in_clause_text: str, on_apply: Callable[[list[dict]], None] | None = None
+) -> None:
+    """Open the dialog pre-selected from the current in= clause text (e.g. the p_apiInClause field)."""
+    selection, unmatched = selection_from_in_clause(load_geo_rows(), in_clause_text)
+    st.session_state[INITIAL_KEY] = selection
+    st.session_state[UNMATCHED_KEY] = unmatched
+    st.session_state[RESEED_KEY] = True
+    geo_selector_dialog(on_apply)

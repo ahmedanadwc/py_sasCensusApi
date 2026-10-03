@@ -25,8 +25,8 @@ from py_sascensusapi.config import (
 )
 from py_sascensusapi.sas_backend import sas_backend
 from py_sascensusapi.census_catalog import search_datasets
-from py_sascensusapi.geo_lookup import in_clause
-from py_sascensusapi.geo_selector_dialog import geo_selector_dialog
+from py_sascensusapi.geo_lookup import load_geo_rows, merge_in_clause, selection_from_in_clause
+from py_sascensusapi.geo_selector_dialog import open_geo_dialog
 
 # Page Configuration
 st.set_page_config(
@@ -341,10 +341,10 @@ def find_step3_tables(ds_unique_id: str) -> dict[str, str]:
 #--------------------------------------------------------------------------------------------------
 # Define a function to push the dialog's geography selection into the Step 3.2 in= clause
 #--------------------------------------------------------------------------------------------------
-def apply_geo_selection(selection: list[dict]) -> None:
-    """Set the in= clause for the selected dataset from the chosen states (state FIPS codes)."""
+def apply_geo_selection(selection: list[dict], current_in: str = "") -> None:
+    """Set the in= clause from the chosen states (FIPS codes), keeping any non-state in= parts."""
     uid_key = str(st.session_state.get("selected_ds_unique_id", ""))
-    st.session_state.step3_query_fields.setdefault(uid_key, {})["in"] = in_clause(selection)
+    st.session_state.step3_query_fields.setdefault(uid_key, {})["in"] = merge_in_clause(current_in, selection)
 
 #--------------------------------------------------------------------------------------------------
 # Define helpers to turn grid selections into a comma delimited list of Name values
@@ -1045,12 +1045,15 @@ with card:
                 help="Populated from the Variables grid selection or the selected sample query",
                 height=90,
             )
+            # The dialog starts from whatever is currently in the in= field (typed, from a sample query, or applied)
+            in_default = q_fields.get("in", "in=state:09,23,25,33,44,50")
+            current_in = st.session_state.get(field_key("in", in_default), in_default)
             geo_btn_col, geo_info_col = st.columns([1, 3])
             with geo_btn_col:
                 if st.button("🌎 Select Geography", key="step3_geo_btn"):
-                    geo_selector_dialog(apply_geo_selection)
+                    open_geo_dialog(current_in, lambda sel, cur=current_in: apply_geo_selection(sel, cur))
             with geo_info_col:
-                geo_sel = st.session_state.get("geo_selection") or []
+                geo_sel, _ = selection_from_in_clause(load_geo_rows(), current_in)
                 if geo_sel:
                     st.caption(
                         f"{len(geo_sel)} state(s): " + ", ".join(r["state_abbrev"] for r in geo_sel)
@@ -1064,7 +1067,6 @@ with card:
                     key=field_key("for", for_default),
                 )
             with col_in:
-                in_default = q_fields.get("in", "in=state:09,23,25,33,44,50")
                 p_apiInClause = st.text_input(
                     "in= Geography Filter Clause (p_apiInClause)",
                     value=in_default,

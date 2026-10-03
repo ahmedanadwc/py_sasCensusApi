@@ -54,3 +54,28 @@ def test_labels_show_the_key_next_to_the_name():
     assert geo.region_label(ct) == "Northeast (1)"
     assert geo.division_label(ct) == "New England (1)"
     assert geo.state_label(ct) == "Connecticut - CT (09)"
+
+
+def test_parse_state_fips_reads_state_values_and_ignores_other_parts():
+    assert geo.parse_state_fips("in=state:09,23, 5") == ["09", "23", "05"]
+    assert geo.parse_state_fips("in=state:06&in=county:037") == ["06"]
+    assert geo.parse_state_fips("in=county:037") == []
+    assert geo.parse_state_fips("in=state:*") == ["*"]
+    assert geo.parse_state_fips("") == []
+
+
+def test_selection_from_in_clause_reports_unknown_values():
+    rows = _rows()
+    selection, unmatched = geo.selection_from_in_clause(rows, "in=state:09,23,99")
+    assert [r["state_abbrev"] for r in selection] == ["CT", "ME"]
+    assert unmatched == ["99"]
+    all_states, _ = geo.selection_from_in_clause(rows, "in=state:*")
+    assert len(all_states) == len(rows)
+
+
+def test_merge_in_clause_replaces_state_part_and_keeps_others():
+    rows = _rows()
+    selection, _ = geo.selection_from_in_clause(rows, "in=state:09,23")
+    assert geo.merge_in_clause("in=state:01&in=county:037", selection) == "in=state:09,23&in=county:037"
+    assert geo.merge_in_clause("in=state:01", []) == ""
+    assert geo.merge_in_clause("", selection) == "in=state:09,23"

@@ -51,3 +51,27 @@ def test_removing_a_division_removes_only_its_states():
     at = _run()
     at.multiselect(key="geo_dlg_divisions").set_value(["East North Central (3)"]).run()
     assert _values(at) == (["Northeast (1)", "Midwest (2)"], ["East North Central (3)"], ["Illinois - IL (17)"])
+
+
+def _seeded_app():
+    import streamlit as st
+    from py_sascensusapi.geo_lookup import load_geo_rows, selection_from_in_clause
+    from py_sascensusapi.geo_selector_dialog import render_geo_multiselects, seed_from_selection
+
+    rows = load_geo_rows()
+    selection, _ = selection_from_in_clause(rows, "in=state:09,23,17")
+    seed_from_selection(selection)
+    render_geo_multiselects(rows)
+
+
+def test_dialog_preselects_states_and_parents_from_in_clause():
+    if SRC not in sys.path:
+        sys.path.insert(0, SRC)
+    at = AppTest.from_function(_seeded_app, default_timeout=30)
+    at.run()
+    assert not at.exception
+    assert _values(at) == (
+        ["Northeast (1)", "Midwest (2)"],
+        ["New England (1)", "East North Central (3)"],
+        ["Connecticut - CT (09)", "Maine - ME (23)", "Illinois - IL (17)"],
+    )
