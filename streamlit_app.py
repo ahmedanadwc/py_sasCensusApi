@@ -977,7 +977,7 @@ with card:
                                 st.session_state.step3_vars_grid_gen += 1
                                 st.rerun()
                         elif label == "Sample Queries":
-                            url_col = next((c for c in df.columns if str(c).lower() == "in_exampleurl"), None)
+                            url_col = next((c for c in df.columns if c == "in_exampleURL"), None)
                             uid_key = str(st.session_state.get("selected_ds_unique_id", ""))
                             last_url = st.session_state.step3_last_example.get(uid_key)
                             pre = [i for i, u in enumerate(df[url_col]) if str(u) == last_url] if url_col and last_url else []
