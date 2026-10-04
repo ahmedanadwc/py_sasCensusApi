@@ -302,6 +302,7 @@ def find_row_index(
 # Names look like <libref>_<ds_unique_id>_<suffix>, e.g. APILIB._45_CPS_1995_VARS
 #--------------------------------------------------------------------------------------------------
 STEP3_LIBREF = "APILIB"
+STEP3_2_MAX_ROWS = 1000  # cap on rows pulled from SAS into pandas for the Step 3.2 result grid
 STEP3_TABS = [
     ("Variables", "_VARS"),
     ("Groups", "_GRPS"),
@@ -1124,7 +1125,7 @@ with card:
                         libref = parts[0] if len(parts) > 1 else "WORK"
                         tbl = parts[1] if len(parts) > 1 else parts[0]
                         if res["success"]:
-                            df = sas_backend.fetch_dataframe(tbl, libref)
+                            df = sas_backend.fetch_dataframe(tbl, libref, ds_opts={"obs": STEP3_2_MAX_ROWS})
                         st.session_state.step3_result2 = {
                             "res": res,
                             "df": df,
@@ -1144,6 +1145,8 @@ with card:
                 df = st.session_state.step3_result2.get("df")
                 if df is not None and not df.empty:
                     st.markdown(f"#### 📊 SAS Dataset Table: `{st.session_state.step3_result2['ds_name']}` ({len(df)} rows, {len(df.columns)} columns)")
+                    if len(df) >= STEP3_2_MAX_ROWS:
+                        st.caption(f"⚠️ Display limited to the first {STEP3_2_MAX_ROWS:,} rows to conserve memory; the full table remains in SAS.")
                     st.dataframe(df, use_container_width=True)
                 elif df is not None and df.empty:
                     st.info(f"ℹ️ Output table `{st.session_state.step3_result2['ds_name']}` exists but is empty.")
