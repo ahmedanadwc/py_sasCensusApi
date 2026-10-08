@@ -1,0 +1,400 @@
+{
+  "communities": {
+    "0": [
+      "check_cache",
+      "duckdb",
+      "graphify_cache",
+      "graphify_extract",
+      "hashlib",
+      "httpx",
+      "json",
+      "logging",
+      "os",
+      "pathlib",
+      "re",
+      "run_ast",
+      "src_py_sascensusapi_census_catalog",
+      "src_py_sascensusapi_config",
+      "src_py_sascensusapi_config_py_path",
+      "src_py_sascensusapi_config_resolve_sas_cfgfile",
+      "src_py_sascensusapi_config_resolve_sas_project_root",
+      "src_py_sascensusapi_sas_backend",
+      "src_py_sascensusapi_streamlit_app",
+      "st_aggrid",
+      "streamlit",
+      "streamlit_app_bkup",
+      "streamlit_app_bkup_highest_unlocked_step",
+      "streamlit_app_bkup_highest_unlocked_step_result_succeeded",
+      "streamlit_app_bkup_set_step",
+      "sys",
+      "typing"
+    ],
+    "1": [
+      "src_py_sascensusapi_census_catalog_fetch_census_catalog",
+      "src_py_sascensusapi_census_catalog_py_any",
+      "src_py_sascensusapi_census_catalog_rationale_59",
+      "src_py_sascensusapi_census_catalog_rationale_91",
+      "src_py_sascensusapi_census_catalog_search_datasets"
+    ],
+    "2": [
+      "claude_skills_graft_skill",
+      "claude_skills_graft_skill_1_graft_ask_question_source_locate_understand_the_default",
+      "claude_skills_graft_skill_2_graft_grep_pattern_exhaustive_find",
+      "claude_skills_graft_skill_3_graft_skeleton_file_a_file_s_api_at_a_glance",
+      "claude_skills_graft_skill_4_graft_callers_symbol_the_exact_edges",
+      "claude_skills_graft_skill_5_graft_map_orientation_for_an_unfamiliar_repo_or_area",
+      "claude_skills_graft_skill_6_lifecycle_graft_build_graft_check",
+      "claude_skills_graft_skill_graft",
+      "claude_skills_graft_skill_report_what_graft_saved_every_turn",
+      "claude_skills_graft_skill_scenarios_the_shortest_path_through_a_coding_task",
+      "claude_skills_graft_skill_spend_the_fewest_calls",
+      "claude_skills_graft_skill_the_tools",
+      "claude_skills_graft_skill_when_graft_isn_t_enough"
+    ],
+    "3": [
+      "claude_helpers_graft_hooks",
+      "claude_helpers_graft_hooks_best",
+      "claude_helpers_graft_hooks_entry",
+      "claude_helpers_graft_hooks_execfilesync",
+      "claude_helpers_graft_hooks_frompkg",
+      "claude_helpers_graft_hooks_fs",
+      "claude_helpers_graft_hooks_globalroot",
+      "claude_helpers_graft_hooks_newer",
+      "claude_helpers_graft_hooks_path",
+      "claude_helpers_graft_hooks_pathtofileurl",
+      "claude_helpers_graft_hooks_versionof",
+      "claude_helpers_graft_statusline",
+      "claude_helpers_graft_statusline_best",
+      "claude_helpers_graft_statusline_entry",
+      "claude_helpers_graft_statusline_execfilesync",
+      "claude_helpers_graft_statusline_frompkg",
+      "claude_helpers_graft_statusline_fs",
+      "claude_helpers_graft_statusline_globalroot",
+      "claude_helpers_graft_statusline_newer",
+      "claude_helpers_graft_statusline_path",
+      "claude_helpers_graft_statusline_pathtofileurl",
+      "claude_helpers_graft_statusline_versionof",
+      "opencode_plugins_graphify",
+      "opencode_plugins_graphify_graphifyplugin",
+      "opencode_plugins_graphify_rationale_4",
+      "ref_child_process",
+      "ref_fs",
+      "ref_path",
+      "ref_url"
+    ],
+    "4": [
+      "ast",
+      "functools",
+      "tests_test_streamlit_connection_visibility",
+      "tests_test_streamlit_connection_visibility_load_function",
+      "tests_test_streamlit_connection_visibility_load_highest_unlocked_step",
+      "tests_test_streamlit_connection_visibility_test_aggrid_autosizes_columns_to_cell_contents",
+      "tests_test_streamlit_connection_visibility_test_connect_handler_does_not_mark_failed_connections_active",
+      "tests_test_streamlit_connection_visibility_test_connection_unlocks_dataset_catalog_step",
+      "tests_test_streamlit_connection_visibility_test_disconnect_relocks_wizard_even_with_previous_results",
+      "tests_test_streamlit_connection_visibility_test_environment_controls_remain_inside_connection_guard",
+      "tests_test_streamlit_connection_visibility_test_environment_section_uses_backend_connection_state",
+      "tests_test_streamlit_connection_visibility_test_failed_step2_result_does_not_unlock_dataset_profile_step",
+      "tests_test_streamlit_connection_visibility_test_initial_state_unlocks_only_connection_step",
+      "tests_test_streamlit_connection_visibility_test_names_to_csv_joins_selected_name_values",
+      "tests_test_streamlit_connection_visibility_test_parse_example_url_handles_missing_and_multiple_in_clauses",
+      "tests_test_streamlit_connection_visibility_test_parse_example_url_splits_clauses",
+      "tests_test_streamlit_connection_visibility_test_selected_rows_to_list_accepts_dataframe_list_and_none",
+      "tests_test_streamlit_connection_visibility_test_step2_result_unlocks_dataset_profile_step",
+      "tests_test_streamlit_connection_visibility_test_step2_reuses_persisted_selection_when_grid_returns_no_selection",
+      "tests_test_streamlit_connection_visibility_test_step3_row_id_field_resets_when_selected_dataset_changes",
+      "tests_test_streamlit_connection_visibility_test_variables_grid_uses_multiple_selection_and_feeds_get_clause"
+    ],
+    "5": [
+      "src_py_sascensusapi_sas_backend_py_any",
+      "src_py_sascensusapi_sas_backend_py_dataframe",
+      "src_py_sascensusapi_sas_backend_py_path",
+      "src_py_sascensusapi_sas_backend_rationale_130",
+      "src_py_sascensusapi_sas_backend_rationale_167",
+      "src_py_sascensusapi_sas_backend_rationale_174",
+      "src_py_sascensusapi_sas_backend_rationale_197",
+      "src_py_sascensusapi_sas_backend_rationale_23",
+      "src_py_sascensusapi_sas_backend_rationale_29",
+      "src_py_sascensusapi_sas_backend_rationale_41",
+      "src_py_sascensusapi_sas_backend_rationale_57",
+      "src_py_sascensusapi_sas_backend_rationale_85",
+      "src_py_sascensusapi_sas_backend_rationale_99",
+      "src_py_sascensusapi_sas_backend_read_parquet",
+      "src_py_sascensusapi_sas_backend_sasbackend",
+      "src_py_sascensusapi_sas_backend_sasbackend_clear_cache",
+      "src_py_sascensusapi_sas_backend_sasbackend_connect",
+      "src_py_sascensusapi_sas_backend_sasbackend_disconnect",
+      "src_py_sascensusapi_sas_backend_sasbackend_fetch_dataframe",
+      "src_py_sascensusapi_sas_backend_sasbackend_get_session",
+      "src_py_sascensusapi_sas_backend_sasbackend_init",
+      "src_py_sascensusapi_sas_backend_sasbackend_is_connected",
+      "src_py_sascensusapi_sas_backend_sasbackend_run_environment_setup",
+      "src_py_sascensusapi_sas_backend_sasbackend_submit_code",
+      "src_py_sascensusapi_sas_backend_sasbackend_table_stamp",
+      "src_py_sascensusapi_sas_backend_write_parquet"
+    ],
+    "6": [
+      "agents",
+      "agents_graft_repo_context_graph"
+    ],
+    "7": [
+      "pandas",
+      "tests_test_sas_backend_cache",
+      "tests_test_sas_backend_cache_fakesas",
+      "tests_test_sas_backend_cache_fakesas_init",
+      "tests_test_sas_backend_cache_fakesas_sasdata",
+      "tests_test_sas_backend_cache_fakesas_submit",
+      "tests_test_sas_backend_cache_fakesas_symget",
+      "tests_test_sas_backend_cache_fakesd",
+      "tests_test_sas_backend_cache_fakesd_init",
+      "tests_test_sas_backend_cache_fakesd_to_df",
+      "tests_test_sas_backend_cache_make",
+      "tests_test_sas_backend_cache_test_disk_cache_survives_new_backend_and_force_refresh_bypasses",
+      "tests_test_sas_backend_cache_test_second_fetch_hits_cache_and_modify_time_invalidates"
+    ],
+    "8": [
+      "streamlit_app",
+      "streamlit_app_extract_sas_config_names",
+      "streamlit_app_field_key",
+      "streamlit_app_find_row_index",
+      "streamlit_app_find_step3_tables",
+      "streamlit_app_highest_unlocked_step",
+      "streamlit_app_highest_unlocked_step_result_succeeded",
+      "streamlit_app_names_to_csv",
+      "streamlit_app_normalize_selected_row",
+      "streamlit_app_parse_example_url",
+      "streamlit_app_py_dataframe",
+      "streamlit_app_rationale_199",
+      "streamlit_app_rationale_252",
+      "streamlit_app_rationale_261",
+      "streamlit_app_rationale_286",
+      "streamlit_app_rationale_314",
+      "streamlit_app_rationale_343",
+      "streamlit_app_rationale_354",
+      "streamlit_app_rationale_367",
+      "streamlit_app_rationale_396",
+      "streamlit_app_render_grid",
+      "streamlit_app_selected_row_value",
+      "streamlit_app_selected_rows_to_list",
+      "streamlit_app_set_step",
+      "urllib_parse"
+    ],
+    "9": [
+      "gemini",
+      "gemini_graft_repo_context_graph"
+    ],
+    "10": [
+      "cbp_2000_exmpls",
+      "cbp_2000_geos",
+      "cbp_2000_grps",
+      "cbp_2000_vars"
+    ],
+    "11": [
+      "mcp",
+      "mcp_command_npx",
+      "mcp_mcp_server_graft",
+      "mcp_package_nanonets_graft"
+    ],
+    "12": [
+      "github_instructions_codacy_instructions_codacy_cli_analyze",
+      "github_instructions_codacy_instructions_codacy_rules",
+      "github_instructions_codacy_instructions_trivy_dependency_scan"
+    ],
+    "13": [
+      "plan_aggrid_width",
+      "spec_aggrid_width"
+    ],
+    "14": [
+      "github_copilot_instructions",
+      "github_copilot_instructions_graft_repo_context_graph",
+      "github_copilot_instructions_graphify"
+    ],
+    "15": [
+      "marimo"
+    ],
+    "16": [
+      "plan_sequential_nav",
+      "spec_sequential_nav"
+    ],
+    "17": [
+      "plan_streamlit_env_visibility",
+      "spec_streamlit_env_visibility"
+    ],
+    "18": [
+      "pkg_py_sascensusapi"
+    ],
+    "19": [
+      "readme"
+    ],
+    "20": [
+      "argparse",
+      "src_py_sascensusapi_cli",
+      "src_py_sascensusapi_cli_main",
+      "src_py_sascensusapi_init",
+      "src_py_sascensusapi_init_rationale_1",
+      "subprocess"
+    ],
+    "21": [
+      "agents_rules_graphify",
+      "agents_rules_graphify_graphify"
+    ],
+    "22": [
+      "agents_workflows_graphify",
+      "agents_workflows_graphify_workflow_graphify"
+    ],
+    "23": [
+      "claude",
+      "claude_graphify"
+    ]
+  },
+  "cohesion": {
+    "0": 0.11396011396011396,
+    "1": 0.5,
+    "2": 0.15384615384615385,
+    "3": 0.10344827586206896,
+    "4": 0.14285714285714285,
+    "5": 0.10461538461538461,
+    "6": 1.0,
+    "7": 0.20512820512820512,
+    "8": 0.08333333333333333,
+    "9": 1.0,
+    "10": 0.5,
+    "11": 0.5,
+    "12": 0.6666666666666666,
+    "13": 1.0,
+    "14": 0.6666666666666666,
+    "15": 1.0,
+    "16": 1.0,
+    "17": 1.0,
+    "18": 1.0,
+    "19": 1.0,
+    "20": 0.4,
+    "21": 1.0,
+    "22": 1.0,
+    "23": 1.0
+  },
+  "gods": [
+    {
+      "id": "src_py_sascensusapi_sas_backend_sasbackend",
+      "label": "SASBackend",
+      "degree": 12
+    },
+    {
+      "id": "tests_test_streamlit_connection_visibility_load_highest_unlocked_step",
+      "label": "_load_highest_unlocked_step()",
+      "degree": 7
+    },
+    {
+      "id": "claude_skills_graft_skill_the_tools",
+      "label": "The tools",
+      "degree": 7
+    },
+    {
+      "id": "tests_test_sas_backend_cache_fakesas",
+      "label": "FakeSAS",
+      "degree": 6
+    },
+    {
+      "id": "tests_test_streamlit_connection_visibility_load_function",
+      "label": "_load_function()",
+      "degree": 6
+    },
+    {
+      "id": "claude_skills_graft_skill_graft",
+      "label": "graft",
+      "degree": 6
+    },
+    {
+      "id": "src_py_sascensusapi_sas_backend_read_parquet",
+      "label": "_read_parquet()",
+      "degree": 5
+    },
+    {
+      "id": "src_py_sascensusapi_sas_backend_write_parquet",
+      "label": "_write_parquet()",
+      "degree": 5
+    },
+    {
+      "id": "tests_test_sas_backend_cache_fakesd",
+      "label": "FakeSD",
+      "degree": 4
+    },
+    {
+      "id": "src_py_sascensusapi_census_catalog_fetch_census_catalog",
+      "label": "fetch_census_catalog()",
+      "degree": 4
+    }
+  ],
+  "surprises": [
+    {
+      "source": "Plan: Streamlit AgGrid Content-Width",
+      "target": "Spec: Streamlit AgGrid Content-Width Design",
+      "source_files": [
+        "docs/superpowers/plans/2026-09-11-streamlit-aggrid-content-width.md",
+        "docs/superpowers/specs/2026-09-11-streamlit-aggrid-content-width-design.md"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "references",
+      "why": "cross-file semantic connection"
+    },
+    {
+      "source": "Plan: Sequential Wizard Navigation",
+      "target": "Spec: Sequential Wizard Navigation Design",
+      "source_files": [
+        "docs/superpowers/plans/2026-09-09-sequential-wizard-navigation.md",
+        "docs/superpowers/specs/2026-09-09-sequential-wizard-navigation-design.md"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "references",
+      "why": "cross-file semantic connection"
+    },
+    {
+      "source": "Plan: Streamlit Session Environment Visibility",
+      "target": "Spec: Streamlit Session Environment Visibility Design",
+      "source_files": [
+        "docs/superpowers/plans/2026-09-09-streamlit-session-environment-visibility.md",
+        "docs/superpowers/specs/2026-09-09-streamlit-session-environment-visibility-design.md"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "references",
+      "why": "cross-file semantic connection"
+    }
+  ],
+  "questions": [
+    {
+      "type": "bridge_node",
+      "question": "Why does `SASBackend` connect `SASBackend` to `sas_backend.py`?",
+      "why": "High betweenness centrality (0.098) - this node is a cross-community bridge."
+    },
+    {
+      "type": "bridge_node",
+      "question": "Why does `_read_parquet()` connect `SASBackend` to `sas_backend.py`?",
+      "why": "High betweenness centrality (0.016) - this node is a cross-community bridge."
+    },
+    {
+      "type": "isolated_nodes",
+      "question": "What connects `npx`, `@nanonets/graft`, `Graft — repo context graph` to the rest of the system?",
+      "why": "37 weakly-connected nodes found - possible documentation gaps or missing edges."
+    },
+    {
+      "type": "low_cohesion",
+      "question": "Should `sas_backend.py` be split into smaller, more focused modules?",
+      "why": "Cohesion score 0.11396011396011396 - nodes in this community are weakly interconnected."
+    },
+    {
+      "type": "low_cohesion",
+      "question": "Should `graft-hooks.cjs` be split into smaller, more focused modules?",
+      "why": "Cohesion score 0.10344827586206896 - nodes in this community are weakly interconnected."
+    },
+    {
+      "type": "low_cohesion",
+      "question": "Should `test_streamlit_connection_visibility.py` be split into smaller, more focused modules?",
+      "why": "Cohesion score 0.14285714285714285 - nodes in this community are weakly interconnected."
+    },
+    {
+      "type": "low_cohesion",
+      "question": "Should `SASBackend` be split into smaller, more focused modules?",
+      "why": "Cohesion score 0.10461538461538461 - nodes in this community are weakly interconnected."
+    }
+  ]
+}

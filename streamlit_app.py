@@ -1142,15 +1142,6 @@ with card:
                 with st.expander(f"📋 SAS Log ({len(r.get('log', '').splitlines())} lines)", expanded=False):
                     st.code(r.get("log", ""), language="sas")
 
-                df = st.session_state.step3_result2.get("df")
-                if df is not None and not df.empty:
-                    st.markdown(f"#### 📊 SAS Dataset Table: `{st.session_state.step3_result2['ds_name']}` ({len(df)} rows, {len(df.columns)} columns)")
-                    if len(df) >= STEP3_2_MAX_ROWS:
-                        st.caption(f"⚠️ Display limited to the first {STEP3_2_MAX_ROWS:,} rows to conserve memory; the full table remains in SAS.")
-                    st.dataframe(df, use_container_width=True)
-                elif df is not None and df.empty:
-                    st.info(f"ℹ️ Output table `{st.session_state.step3_result2['ds_name']}` exists but is empty.")
-
         with s3_col_r2:
             with st.expander("📝 Generated SAS Code Preview", expanded=False):
                 st.code(sas_code_step3_2, language="sas")
@@ -1161,9 +1152,20 @@ with card:
                     mime="text/plain",
                 )
 
+        
+        if st.session_state.step3_result2:
+            df = st.session_state.step3_result2.get("df")
+            if df is not None and not df.empty:
+                st.markdown(f"#### 📊 SAS Dataset Table: `{st.session_state.step3_result2['ds_name']}` ({len(df)} rows, {len(df.columns)} columns)")
+                if len(df) >= STEP3_2_MAX_ROWS:
+                    st.caption(f"⚠️ Display limited to the first {STEP3_2_MAX_ROWS:,} rows to conserve memory; the full table remains in SAS.")
+                st.dataframe(df, width='stretch')
+            elif df is not None and df.empty:
+                st.info(f"ℹ️ Output table `{st.session_state.step3_result2['ds_name']}` exists but is empty.")
+
         st.markdown("---")
 
         s3_col_back, _ = st.columns([1, 1])
         with s3_col_back:
-            if st.button("< Back: Collect Datasets", use_container_width=True):
+            if st.button("< Back: Collect Datasets", width='stretch'):
                 set_step(1)

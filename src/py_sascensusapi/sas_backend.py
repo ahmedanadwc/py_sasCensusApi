@@ -118,7 +118,7 @@ class SASBackend:
 options sasautos=(SASAUTOS, {macro_paths}) mautosource;
 
 /* Options for Census API parsing */
-options validvarname=any nosyntaxcheck dlcreatedir;
+options validvarname=any nosyntaxcheck dlcreatedir fullstimer mprint source source2;
 
 /* Assign APILIB libname */
 libname apilib "{data_path}";
