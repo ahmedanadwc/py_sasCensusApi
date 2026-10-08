@@ -21,9 +21,6 @@ env/
 .DS_Store
 Thumbs.db
 
-# Large generated data (graphify)
-graphify-out/
-
 # Build artifacts
 build/
 Dist/
@@ -34,3 +31,15 @@ Dist/
 
 # Logs
 *.log
+
+# Tool‑generated artefacts – do NOT track these
+agents/
+.claude/
+.codacy/
+.codegraph/
+.gemini/
+.github/
+.opencode/
+.vscode/
+docs/superpowers/
+graphify-out/
