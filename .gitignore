@@ -1,19 +1,36 @@
-# Python-generated files
+# Python & general ignores
 __pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
-
-# Virtual environments
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.env
 .venv
+venv/
+ENV/
+env/
 
-# Git worktrees
-.worktrees/
+# VS Code settings
+.vscode/
 
-#Ignore vscode AI rules
-.github\instructions\codacy.instructions.md
+# PyCharm / IDE settings
+.idea/
+*.iml
 
-# graft's local graph cache — regenerable, not committed (run `graft build`).
-/graft/
+# OS files
+.DS_Store
+Thumbs.db
+
+# Large generated data (graphify)
+graphify-out/
+
+# Build artifacts
+build/
+Dist/
+*.egg
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
