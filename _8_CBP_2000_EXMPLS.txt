@@ -1,1 +1,0 @@
-https://api.census.gov/data/2025/cps/basic/jun?get=PEMLR,PWSSWGT,PEMARITL&for=county:*&in=state:01&PEEDUCA=39	
