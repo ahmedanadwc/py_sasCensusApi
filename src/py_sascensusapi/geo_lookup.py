@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
-
-import streamlit as st
 
 _PKG_DIR = Path(__file__).resolve().parent
 GEO_JSON_NAME = "census_reg_div_lkup.json"
@@ -43,9 +42,9 @@ def flatten_hierarchy(data: dict) -> list[dict]:
     return rows
 
 
-@st.cache_data(show_spinner=False)
+@lru_cache(maxsize=None)
 def load_geo_rows(path: str | None = None) -> list[dict]:
-    """Load and flatten the lookup JSON once (cached)."""
+    """Load and flatten the lookup JSON once (cached; treat the returned rows as read-only)."""
     json_path = Path(path) if path else find_geo_json()
     with open(json_path, "r", encoding="utf-8") as f:
         return flatten_hierarchy(json.load(f))

@@ -43,3 +43,10 @@ agents/
 .vscode/
 docs/superpowers/
 graphify-out/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+
+# graphify scratch scripts
+/run_ast.py
+/check_cache.py

@@ -13,15 +13,13 @@ def _resolve_sas_project_root() -> Path:
         cwd.parent,
         cwd.parent / "sasCensusApiLocalGitRepo",
         Path.home() / "sasCensusApiLocalGitRepo",
-        Path("/home/anawarehousing/sasCensusApiLocalGitRepo"),
     ]
     for candidate in candidates:
         if (candidate / "code" / "macros" / "censusapi").exists():
             return candidate.resolve()
 
-    if env_root:
-        return Path(env_root)
-    return cwd if (cwd / "code").exists() else Path("/home/anawarehousing/sasCensusApiLocalGitRepo")
+    # Nothing found: honour SAS_PROJECT_ROOT as given, else work from the current directory.
+    return Path(env_root) if env_root else cwd
 
 
 # Dynamic resolution of personal SASPy config file path
