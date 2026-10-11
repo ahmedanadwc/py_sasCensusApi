@@ -6,7 +6,7 @@ from urllib.parse import unquote
 import pandas as pd
 
 
-APP_PATH = Path(__file__).parents[1] / "streamlit_app.py"
+APP_PATH = Path(__file__).parents[1] / "src" / "py_sascensusapi" / "app.py"
 
 
 @cache

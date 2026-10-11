@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import httpx
@@ -10,6 +11,9 @@ logger = logging.getLogger(__name__)
 
 CACHE_FILE = Path.home() / ".cache" / "py_sascensusapi" / "census_catalog.json"
 _CATALOG_CACHE: Optional[List[Dict[str, Any]]] = None
+CACHE_TTL_SECONDS = 7 * 24 * 3600
+FAILURE_BACKOFF_SECONDS = 60
+_LAST_FAILURE = 0.0
 
 # Built-in curated popular endpoints as instant fallbacks
 POPULAR_DATASETS = [
@@ -61,7 +65,11 @@ def fetch_census_catalog(url: str = DEFAULT_DATA_JSON_URL, force_refresh: bool =
     if _CATALOG_CACHE is not None and not force_refresh:
         return _CATALOG_CACHE
 
-    if not force_refresh and CACHE_FILE.exists():
+    global _LAST_FAILURE
+    if not force_refresh and time.time() - _LAST_FAILURE < FAILURE_BACKOFF_SECONDS:
+        return []
+
+    if not force_refresh and CACHE_FILE.exists() and time.time() - CACHE_FILE.stat().st_mtime < CACHE_TTL_SECONDS:
         try:
             with open(CACHE_FILE, "r", encoding="utf-8") as f:
                 _CATALOG_CACHE = json.load(f)
@@ -85,6 +93,14 @@ def fetch_census_catalog(url: str = DEFAULT_DATA_JSON_URL, force_refresh: bool =
             return datasets
     except Exception as exc:
         logger.warning("Failed to fetch census catalog: %s", exc)
+        _LAST_FAILURE = time.time()
+        if CACHE_FILE.exists():
+            try:  # network is down: a stale catalog beats none
+                with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                    _CATALOG_CACHE = json.load(f)
+                    return _CATALOG_CACHE
+            except Exception as read_exc:
+                logger.warning("Failed to load stale catalog: %s", read_exc)
         return []
 
 def search_datasets(query: str = "", year: Optional[str] = None, max_results: int = 50) -> List[Dict[str, Any]]:

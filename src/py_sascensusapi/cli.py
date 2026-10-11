@@ -23,7 +23,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    app_path = Path(__file__).parent / "streamlit_app.py"
+    app_path = Path(__file__).parent / "app.py"
 
     cmd = [
         sys.executable,

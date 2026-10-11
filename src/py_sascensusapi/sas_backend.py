@@ -1,22 +1,34 @@
 import hashlib
 import json
 import logging
+import os
 import re
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 import duckdb
 import pandas as pd
 
-from py_sascensusapi.config import (
-    SAS_PROJECT_ROOT,
-    SAS_MACRO_DIRS,
-    SAS_DATA_ROOT,
-    DEFAULT_SAS_CFGFILE,
-)
+from py_sascensusapi.config import SAS_PROJECT_ROOT, DEFAULT_SAS_CFGFILE
 
 logger = logging.getLogger(__name__)
 
 DF_CACHE_DIR = Path.home() / ".cache" / "py_sascensusapi" / "dataframes"
+
+
+_UNSAFE_MACRO_ARG = re.compile(r"[;%()'\"`\r\n]")
+_UNSAFE_PATH = re.compile(r"[;\"\r\n]")
+
+
+def find_unsafe_macro_args(fields: Dict[str, Any]) -> list[str]:
+    """Names of fields whose value could break out of a SAS macro argument (;, %, quotes, parens, newlines)."""
+    return [name for name, value in fields.items() if _UNSAFE_MACRO_ARG.search(str(value))]
+
+
+def macro_literal(value: str) -> str:
+    """Wrap `value` in %nrstr() with quotes, parens and % masked, so it is stored verbatim by %let."""
+    masked = re.sub(r"([%'\"()])", r"%\1", value.replace("\r", "").replace("\n", ""))
+    return f"%nrstr({masked})"
 
 
 def _read_parquet(path: Path) -> pd.DataFrame:
@@ -27,7 +39,7 @@ def _read_parquet(path: Path) -> pd.DataFrame:
 
 def _write_parquet(df: pd.DataFrame, path: Path) -> None:
     """Write a DataFrame to parquet using DuckDB (temp file, then atomic replace)."""
-    tmp = path.with_suffix(".tmp")
+    tmp = path.with_name(f"{path.stem}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
     target = str(tmp).replace("'", "''")
     try:
         with duckdb.connect() as con:
@@ -90,7 +102,6 @@ class SASBackend:
                 logger.warning("Error ending SAS session: %s", exc)
             finally:
                 self._sas = None
-                self._cfgname = None
                 self.clear_cache()
             return "SAS session ended."
         return "No active SAS session."
@@ -102,6 +113,8 @@ class SASBackend:
 
         # Normalize slashes for SAS
         clean_root = proj_root.replace("\\", "/")
+        if _UNSAFE_PATH.search(clean_root):
+            return {"success": False, "log": "Project root contains unsafe characters (; \" or newline).", "errors": ["Unsafe project root"]}
         macro_paths = ", ".join([f'"{clean_root}/code/macros/{sub}"' for sub in ["censusapi", "etl", "util"]])
         data_path = f"{clean_root}/data"
         out_path = f"{clean_root}/output"
@@ -109,9 +122,9 @@ class SASBackend:
         setup_code = f"""
 /* SAS Census API Environment Initialization */
 %global g_projRootPath g_apiKey g_outputRoot;
-%let g_projRootPath = %str({clean_root});
-%let g_outputRoot = %str({out_path});
-%let g_apiKey = %str({api_key});
+%let g_projRootPath = {macro_literal(clean_root)};
+%let g_outputRoot = {macro_literal(out_path)};
+%let g_apiKey = {macro_literal(api_key)};
 %let g_slash = %str(/);
 
 /* Macro autocall directories */
@@ -191,7 +204,7 @@ options fmtsearch=(WORK apilib);
         self,
         table_name: str,
         libref: str = "WORK",
-        ds_opts: Dict[str, Any] = None,
+        ds_opts: Optional[Dict[str, Any]] = None,
         force_refresh: bool = False,
     ) -> Optional[pd.DataFrame]:
         """Retrieve a SAS table into a pandas DataFrame, cached by table, options and modify-time."""
@@ -201,7 +214,11 @@ options fmtsearch=(WORK apilib);
         stamp = None if force_refresh else self._table_stamp(table_name, libref)
         key = None
         if stamp:
-            raw = json.dumps([libref.upper(), table_name.upper(), ds_opts, stamp], sort_keys=True, default=str)
+            raw = json.dumps(
+                [self._cfgname, self._cfgfile, libref.upper(), table_name.upper(), ds_opts, stamp],
+                sort_keys=True,
+                default=str,
+            )
             key = hashlib.sha1(raw.encode("utf-8")).hexdigest()
             if key in self._df_cache:
                 return self._df_cache[key].copy()
