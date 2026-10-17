@@ -319,32 +319,139 @@ STEP3_TABS = [
 ]
 
 #--------------------------------------------------------------------------------------------------
-# Define a function to find the Step 3 table names for a dataset row id
+# Define helpers to find and resolve Step 3 table names and IDs
 #--------------------------------------------------------------------------------------------------
-def find_step3_tables(ds_unique_id: str) -> dict[str, str]:
-    """Map each tab label to its APILIB table name by scanning SASHELP.VTABLE.
+def resolve_step3_uid(row_id: str | int, default_uid: str = "") -> str:
+    """Resolve ds_unique_id for a given row_id from Step 2 catalog DataFrame if available."""
+    rid_str = str(row_id).strip()
+    s2_df = (st.session_state.get("step2_result") or {}).get("df")
+    if s2_df is not None and not s2_df.empty:
+        row_col = next((c for c in s2_df.columns if str(c).lower() == "_rowid_"), None)
+        uid_col = next((c for c in s2_df.columns if str(c).lower() == "ds_unique_id"), None)
+        if row_col and uid_col:
+            matches = s2_df[s2_df[row_col].astype(str) == rid_str]
+            if not matches.empty:
+                val = str(matches.iloc[0][uid_col]).strip()
+                if val:
+                    return val
+    return default_uid
 
-    A table matches when its name ends with <ds_unique_id><suffix>, with the
-    ds_unique_id sanitized the way SAS builds member names (non-word chars -> "_").
+
+def list_sas_members(libname: str) -> list[str]:
+    """List member names straight from DICTIONARY.TABLES (always current, never cached)."""
+    if not (sas_backend.is_connected and sas_backend._sas is not None):
+        return []
+    lib = str(libname).strip().upper().replace("'", "")
+    try:
+        sas_backend._sas.submit(
+            "proc sql noprint; select memname into :_py_memnames separated by ' ' "
+            f"from dictionary.tables where libname='{lib}' and memtype in ('DATA','VIEW'); quit;"
+        )
+        raw = sas_backend._sas.symget("_py_memnames") or ""
+        return [n.strip().upper() for n in raw.split() if n.strip()]
+    except Exception:
+        return []
+
+
+def find_step3_tables(
+    ds_unique_id: str = "",
+    libname: str = STEP3_LIBREF,
+    row_id: str | int | None = None,
+) -> dict[str, str]:
+    """Map each tab label to its SAS table name by scanning SASHELP.VTABLE.
+
+    Matches tables flexibly by:
+      1. Full ds_unique_id + suffix (with case, leading/trailing underscore normalization).
+      2. SAS 32-character member name truncation (matching up to 32 characters).
+      3. Row ID prefix (_<row_id>_..._<suffix>) when row_id is provided or derived from ds_unique_id.
     """
-    uid = re.sub(r"\W", "_", str(ds_unique_id).strip()).upper()
-    if not uid:
+    clean_lib = str(libname or STEP3_LIBREF).strip().upper()
+    uid_str = str(ds_unique_id or "").strip()
+    clean_uid = re.sub(r"\W", "_", uid_str).upper()
+
+    # Extract or normalize row_id
+    rid_str = str(row_id).strip() if row_id is not None and str(row_id).strip() else ""
+    if not rid_str and clean_uid:
+        m = re.match(r"^[_]?(\d+)_", clean_uid)
+        if m:
+            rid_str = m.group(1)
+
+    if not clean_uid and not rid_str:
         return {}
+
     members = sas_backend.fetch_dataframe(
-        "VTABLE", "SASHELP", ds_opts={"WHERE": f"(libname='{STEP3_LIBREF}')"}
+        "VTABLE", "SASHELP", ds_opts={"WHERE": f"(libname='{clean_lib}')"}
     )
-    if members is None or members.empty:
+    names: list[str] = []
+    if members is not None and not members.empty:
+        memname_col = next((c for c in members.columns if c.lower() == "memname"), None)
+        if memname_col is not None:
+            names = [str(n).strip().upper() for n in members[memname_col]]
+
+    if not names:
+        names = list_sas_members(clean_lib)
+    if not names:
         return {}
-    memname_col = next((c for c in members.columns if c.lower() == "memname"), None)
-    if memname_col is None:
-        return {}
-    names = [str(n).strip() for n in members[memname_col]]
-    found = {}
-    for label, suffix in STEP3_TABS:
-        for name in names:
-            if name.upper().endswith(f"{uid}{suffix}"):
-                found[label] = name
-                break
+
+    def _match(names: list[str]) -> dict[str, str]:
+        found: dict[str, str] = {}
+        uid_variants = set()
+        if clean_uid:
+            uid_variants.add(clean_uid)
+            uid_variants.add(clean_uid.lstrip("_"))
+            uid_variants.add(f"_{clean_uid.lstrip('_')}")
+
+        for label, suffix in STEP3_TABS:
+            suf = suffix.upper()
+            matched = None
+
+            # 1. Exact match with any uid variant + suffix (including 32-character SAS name truncation)
+            for name in names:
+                for u in uid_variants:
+                    target = f"{u}{suf}"
+                    trunc_target = target[:32]
+                    prefix_trunc = f"{u[:32 - len(suf)]}{suf}"
+                    if (
+                        name == target
+                        or name.endswith(target)
+                        or name == trunc_target
+                        or name == prefix_trunc
+                    ):
+                        matched = name
+                        break
+                if matched:
+                    break
+
+            # 2. Row ID prefix match: _<row_id>_..._<suffix> or <row_id>_..._<suffix>
+            if not matched and rid_str:
+                rid_pfx1 = f"_{rid_str}_"
+                rid_pfx2 = f"{rid_str}_"
+                for name in names:
+                    if name.startswith(rid_pfx1) or name.startswith(rid_pfx2):
+                        if name.endswith(suf) or (len(suf) > 4 and name.endswith(suf[:4])):
+                            matched = name
+                            break
+
+            # 3. Substring match: name contains the stripped core uid and ends with suffix
+            if not matched and clean_uid:
+                base_key = clean_uid.strip("_")
+                if base_key:
+                    for name in names:
+                        if (base_key in name or name in base_key) and name.endswith(suf):
+                            matched = name
+                            break
+
+            if matched:
+                found[label] = matched
+
+        return found
+
+    found = _match(names)
+    if len(found) < len(STEP3_TABS):
+        # SASHELP.VTABLE can lag tables the macro just created; re-check against the dictionary
+        fresh = list_sas_members(clean_lib)
+        if fresh and set(fresh) != set(names):
+            found = _match(fresh)
     return found
 
 #--------------------------------------------------------------------------------------------------
@@ -405,6 +512,15 @@ def parse_example_url(url: str) -> dict[str, str]:
 #--------------------------------------------------------------------------------------------------
 # Define a function to display a DataFrame in an AgGrid (optionally with row selection)
 #--------------------------------------------------------------------------------------------------
+def _clean_df_for_grid(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure DataFrame columns and values are safely serializable for AgGrid."""
+    clean = df.copy()
+    for col in clean.columns:
+        if clean[col].dtype == object or pd.api.types.is_datetime64_any_dtype(clean[col]):
+            clean[col] = clean[col].apply(lambda x: "" if pd.isna(x) else str(x))
+    return clean
+
+
 def render_grid(
     df: pd.DataFrame,
     key: str,
@@ -413,7 +529,8 @@ def render_grid(
     pre_selected_rows: list[int] | None = None,
 ):
     """Show a DataFrame in an AgGrid sized to its cell contents; returns the AgGrid result."""
-    gb = GridOptionsBuilder.from_dataframe(df)
+    clean_df = _clean_df_for_grid(df)
+    gb = GridOptionsBuilder.from_dataframe(clean_df)
     gb.configure_default_column(filter=True, sortable=True, resizable=True)
     if selection_mode:
         gb.configure_selection(
@@ -441,15 +558,20 @@ def render_grid(
     # initial autosize measures nothing; re-run it when the grid becomes visible.
     grid_options["onGridSizeChanged"] = auto_size_columns
     extra = {"update_on": ["selectionChanged"]} if selection_mode else {}
-    return AgGrid(
-        df,
-        gridOptions=grid_options,
-        height=height,
-        fit_columns_on_grid_load=False,
-        allow_unsafe_jscode=True,
-        key=key,
-        **extra,
-    )
+    try:
+        return AgGrid(
+            clean_df,
+            gridOptions=grid_options,
+            height=height,
+            fit_columns_on_grid_load=False,
+            allow_unsafe_jscode=True,
+            key=key,
+            **extra,
+        )
+    except Exception as exc:
+        logger.warning("AgGrid rendering failed for key %s: %s; falling back to st.dataframe", key, exc)
+        st.dataframe(clean_df, width="stretch", height=height)
+        return {"selected_rows": []}
 
 # ------------------------------------ End Utility Functions ------------------------------------
 
@@ -469,7 +591,7 @@ with st.sidebar:
         if st.button(
             f"{prefix}Step {i+1}: {s['short']}",
             key=f"nav_btn_{i}",
-            use_container_width=True,
+            width="stretch",
             type="primary" if is_active else "secondary",
             disabled=i > unlocked_step,
         ):
@@ -556,7 +678,7 @@ with card:
                 key="step1_cfg_select",
             )
             st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-            if st.button("🔌 Connect to SAS", type="primary", use_container_width=True):
+            if st.button("🔌 Connect to SAS", type="primary", width="stretch"):
                 with st.spinner("Connecting to SAS via SASPy..."):
                     success, msg = sas_backend.connect(
                         cfgname=cfg_select,
@@ -568,7 +690,7 @@ with card:
                     st.session_state["sas_connected"] = success
                 st.rerun()
             st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-            if st.button("🔌 Disconnect", use_container_width=True):
+            if st.button("🔌 Disconnect", width="stretch"):
                 msg = sas_backend.disconnect()
                 st.session_state.pop("step3_autoload_uid", None)
                 st.session_state.sas_status_msg = f"⚪ {msg}"
@@ -604,7 +726,7 @@ with card:
                 if st.button(
                     "⚙️ Initialize SAS Autocall & Libnames",
                     type="secondary",
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     if not sas_backend.is_connected:
                         st.warning("⚠️ Connect to SAS first before initializing the macro environment.")
@@ -638,7 +760,7 @@ with card:
         with s1_col_tip:
             st.caption("💡 *Tip: If running offline without SAS, you can still configure parameters and download SAS scripts in subsequent steps.*")
         with s1_col_next:
-            if st.button("Next: Collect Dataset Catalog >", type="primary", use_container_width=True):
+            if st.button("Next: Collect Dataset Catalog >", type="primary", width="stretch"):
                 if unlocked_step >= 1:
                     set_step(1)
 
@@ -835,10 +957,10 @@ with card:
         st.markdown("---")
         s2_col_back, s2_col_next = st.columns([1, 1])
         with s2_col_back:
-            if st.button("< Back: SAS Connection", use_container_width=True):
+            if st.button("< Back: SAS Connection", width="stretch"):
                 set_step(0)
         with s2_col_next:
-            if st.button("Next: Dataset Profile & Query Builder>", type="primary", use_container_width=True):
+            if st.button("Next: Dataset Profile & Query Builder>", type="primary", width="stretch"):
                 if unlocked_step >= 2:
                     set_step(2)
 
@@ -897,51 +1019,63 @@ with card:
                 ):
                     pass
                 else:
-                    uid = st.session_state.get("selected_ds_unique_id", "")
-                    existing = find_step3_tables(uid) if reuse_step3 else {}
+                    target_lib = p_apiListingLibName.strip() or STEP3_LIBREF
+                    uid = resolve_step3_uid(p_dsRowId, st.session_state.get("selected_ds_unique_id", ""))
+                    if uid:
+                        st.session_state["selected_ds_unique_id"] = uid
+                    st.session_state["selected_row_id"] = p_dsRowId
+
+                    existing = find_step3_tables(uid, libname=target_lib, row_id=p_dsRowId) if reuse_step3 else {}
                     if len(existing) == len(STEP3_TABS):
                         res = {
                             "success": True, "has_errors": False, "errors": [], "warnings": [], "lst": "",
-                            "log": "Reused existing APILIB profile tables; %censusapi_getDsFullInfo was not re-run.",
+                            "log": f"Reused existing {target_lib} profile tables; %censusapi_getDsFullInfo was not re-run.",
                         }
                         found = existing
                     else:
                         with st.spinner("Running %censusapi_getDsFullInfo in SAS..."):
                             res = sas_backend.submit_code(sas_code_step3_1)
-                            found = find_step3_tables(uid) if res["success"] else {}
+                            found = find_step3_tables(uid, libname=target_lib, row_id=p_dsRowId) if res["success"] else {}
                     with st.spinner("Loading profile tables..."):
                         tables = {
-                            label: (table, sas_backend.fetch_dataframe(table, STEP3_LIBREF))
+                            label: (table, sas_backend.fetch_dataframe(table, target_lib))
                             for label, table in found.items()
                         }
-                    st.session_state.step3_result = {"res": res, "tables": tables, "uid": uid}
+                    st.session_state.step3_result = {
+                        "res": res,
+                        "tables": tables,
+                        "uid": uid,
+                        "lib": target_lib,
+                        "row_id": p_dsRowId,
+                    }
 
-            # Auto-load cached profile tables that match the selected ds_unique_id
+            # Auto-load cached profile tables that match the selected ds_unique_id / row_id
             current_uid = str(st.session_state.get("selected_ds_unique_id", "") or "")
+            target_lib = p_apiListingLibName.strip() or STEP3_LIBREF
             loaded = st.session_state.step3_result
             if (
                 sas_backend.is_connected
-                and current_uid
+                and (current_uid or p_dsRowId)
                 and (loaded or {}).get("uid") != current_uid
                 and st.session_state.get("step3_autoload_uid") != current_uid
             ):
                 st.session_state.step3_autoload_uid = current_uid
                 with st.spinner("Checking SAS for existing profile tables..."):
-                    found = find_step3_tables(current_uid)
+                    found = find_step3_tables(current_uid, libname=target_lib, row_id=p_dsRowId)
                     if found:
                         st.session_state.step3_result = {
                             "res": {
                                 "success": True, "has_errors": False, "errors": [], "warnings": [], "lst": "",
-                                "log": f"Loaded existing APILIB profile tables for {current_uid}; macro not re-run.",
+                                "log": f"Loaded existing {target_lib} profile tables for {current_uid or p_dsRowId}; macro not re-run.",
                             },
                             "tables": {
-                                label: (table, sas_backend.fetch_dataframe(table, STEP3_LIBREF))
+                                label: (table, sas_backend.fetch_dataframe(table, target_lib))
                                 for label, table in found.items()
                             },
                             "uid": current_uid,
+                            "lib": target_lib,
+                            "row_id": p_dsRowId,
                         }
-                    elif loaded and loaded.get("uid") != current_uid:
-                        st.session_state.step3_result = None
 
             if st.session_state.step3_result:
                 r = st.session_state.step3_result["res"]
@@ -969,70 +1103,128 @@ with card:
         step3_result = st.session_state.step3_result
         if step3_result and step3_result["res"]["success"]:
             tables = step3_result.get("tables", {})
+            active_lib = step3_result.get("lib", STEP3_LIBREF)
+            s3_tab_header_col1, s3_tab_header_col2 = st.columns([3, 1])
+            with s3_tab_header_col1:
+                st.markdown("#### 📋 Profile Datasets")
+            with s3_tab_header_col2:
+                grid_mode = st.radio(
+                    "Display Mode",
+                    ["Interactive Grid", "Standard Table"],
+                    horizontal=True,
+                    label_visibility="collapsed",
+                    key="step3_grid_mode",
+                )
+
             tabs = st.tabs([label for label, _ in STEP3_TABS])
             for tab, (label, suffix) in zip(tabs, STEP3_TABS):
                 with tab.container():
                     table, df = tables.get(label, (None, None))
                     if table is None:
-                        st.info(f"No `{STEP3_LIBREF}` table ending in `{suffix}` was found for this dataset.")
-                    elif df is None:
-                        st.info(f"Table `{STEP3_LIBREF}.{table}` could not be loaded from SAS.")
-                    elif df.empty:
-                        st.info(f"Table `{STEP3_LIBREF}.{table}` has no rows.")
-                    else:
-                        st.caption(f"`{STEP3_LIBREF}.{table}` — {len(df)} rows, {len(df.columns)} columns")
+                        st.info(f"No `{active_lib}` table ending in `{suffix}` was found for this dataset.")
                         if label == "Variables":
-                            name_col = next((c for c in df.columns if str(c).lower() == "name"), None)
-                            uid_key = str(st.session_state.get("selected_ds_unique_id", ""))
-                            chosen = st.session_state.step3_selected_vars.get(uid_key, [])
-                            pre = [i for i, n in enumerate(df[name_col]) if str(n).strip() in chosen] if name_col else []
-                            gen = st.session_state.step3_vars_grid_gen
-                            grid_res = render_grid(
-                                df,
-                                key=f"data-grid-step3-{label}-{gen}",
-                                selection_mode="multiple",
-                                pre_selected_rows=pre,
-                            )
-                            picked = selected_rows_to_list(grid_res.get("selected_rows", None))
-                            if picked:
-                                names = names_to_csv(picked).split(",")
-                                if names != st.session_state.step3_selected_vars.get(uid_key):
-                                    st.session_state.step3_selected_vars[uid_key] = names
-                                    st.session_state.step3_query_fields.setdefault(uid_key, {})["get"] = "get=" + ",".join(names)
-                            n_sel = len(st.session_state.step3_selected_vars.get(uid_key, []))
-                            st.caption(f"{n_sel} variable(s) selected - they populate `get=` in the query builder below.")
-                            if n_sel and st.button("Clear selected variables", key="step3_clear_vars"):
-                                st.session_state.step3_selected_vars[uid_key] = []
-                                st.session_state.step3_query_fields.setdefault(uid_key, {})["get"] = "get="
-                                st.session_state.step3_vars_grid_gen += 1
-                                st.rerun()
-                        elif label == "Sample Queries":
-                            url_col = next((c for c in df.columns if c == "in_exampleURL"), None)
-                            uid_key = str(st.session_state.get("selected_ds_unique_id", ""))
-                            last_url = st.session_state.step3_last_example.get(uid_key)
-                            pre = [i for i, u in enumerate(df[url_col]) if str(u) == last_url] if url_col and last_url else []
-                            grid_res = render_grid(
-                                df,
-                                key=f"data-grid-step3-{label}",
-                                selection_mode="single",
-                                pre_selected_rows=pre,
-                            )
-                            picked = selected_rows_to_list(grid_res.get("selected_rows", None))
-                            if picked and url_col:
-                                url = str(picked[0].get(url_col, "") or "").strip()
-                                if url and url != last_url:
-                                    parsed = parse_example_url(url)
-                                    fields = st.session_state.step3_query_fields.setdefault(uid_key, {})
-                                    fields.update({k: v for k, v in parsed.items() if k != "base_url" or v})
-                                    st.session_state.step3_last_example[uid_key] = url
-                                    st.rerun()
-                            st.caption("Select a sample query to fill the base URL, get=, for= and in= fields below.")
+                            uid_dbg = str(step3_result.get("uid", ""))
+                            sanitized = re.sub(r"\W", "_", uid_dbg.strip()).upper()
+                            members = sorted(list_sas_members(active_lib))
+                            st.caption(f"Searched for names matching `{sanitized}{suffix}` or row ID `{step3_result.get('row_id')}`.")
+                            with st.expander(f"Tables currently in {active_lib} ({len(members)})"):
+                                st.code("\n".join(members) or "(none)")
+                    elif df is None:
+                        st.info(f"Table `{active_lib}.{table}` could not be loaded from SAS.")
+                    elif df.empty:
+                        st.info(f"Table `{active_lib}.{table}` exists in SAS but has no rows (normal for datasets without {label.lower()}).")
+                    else:
+                        st.caption(f"`{active_lib}.{table}` — {len(df)} rows, {len(df.columns)} columns")
+                        if grid_mode == "Standard Table":
+                            st.dataframe(df, width="stretch", height=450)
+                            if label == "Variables":
+                                name_col = next((c for c in df.columns if str(c).lower() == "name"), None)
+                                if name_col:
+                                    uid_key = str(st.session_state.get("selected_ds_unique_id", ""))
+                                    all_names = [str(n).strip() for n in df[name_col]]
+                                    curr_chosen = [x for x in st.session_state.step3_selected_vars.get(uid_key, []) if x in all_names]
+                                    picked = st.multiselect(
+                                        "Select variables for query:",
+                                        options=all_names,
+                                        default=curr_chosen,
+                                        key=f"step3_std_vars_{uid_key}",
+                                    )
+                                    if picked != st.session_state.step3_selected_vars.get(uid_key):
+                                        st.session_state.step3_selected_vars[uid_key] = picked
+                                        st.session_state.step3_query_fields.setdefault(uid_key, {})["get"] = "get=" + ",".join(picked)
+                                        st.rerun()
+                            elif label == "Sample Queries":
+                                url_col = next((c for c in df.columns if c == "in_exampleURL"), None)
+                                if url_col:
+                                    uid_key = str(st.session_state.get("selected_ds_unique_id", ""))
+                                    urls = [str(u).strip() for u in df[url_col] if str(u).strip()]
+                                    last_url = st.session_state.step3_last_example.get(uid_key, "")
+                                    idx = urls.index(last_url) + 1 if last_url in urls else 0
+                                    chosen_url = st.selectbox(
+                                        "Load query parameters from sample:",
+                                        ["(None)"] + urls,
+                                        index=idx,
+                                        key=f"step3_std_example_{uid_key}",
+                                    )
+                                    if chosen_url and chosen_url != "(None)" and chosen_url != last_url:
+                                        parsed = parse_example_url(chosen_url)
+                                        fields = st.session_state.step3_query_fields.setdefault(uid_key, {})
+                                        fields.update({k: v for k, v in parsed.items() if k != "base_url" or v})
+                                        st.session_state.step3_last_example[uid_key] = chosen_url
+                                        st.rerun()
                         else:
-                            render_grid(df, key=f"data-grid-step3-{label}")
+                            if label == "Variables":
+                                name_col = next((c for c in df.columns if str(c).lower() == "name"), None)
+                                uid_key = str(st.session_state.get("selected_ds_unique_id", ""))
+                                chosen = st.session_state.step3_selected_vars.get(uid_key, [])
+                                pre = [i for i, n in enumerate(df[name_col]) if str(n).strip() in chosen] if name_col else []
+                                gen = st.session_state.step3_vars_grid_gen
+                                grid_res = render_grid(
+                                    df,
+                                    key=f"data-grid-step3-{label}-{gen}",
+                                    selection_mode="multiple",
+                                    pre_selected_rows=pre,
+                                )
+                                picked = selected_rows_to_list(grid_res.get("selected_rows", None))
+                                if picked:
+                                    names = names_to_csv(picked).split(",")
+                                    if names != st.session_state.step3_selected_vars.get(uid_key):
+                                        st.session_state.step3_selected_vars[uid_key] = names
+                                        st.session_state.step3_query_fields.setdefault(uid_key, {})["get"] = "get=" + ",".join(names)
+                                n_sel = len(st.session_state.step3_selected_vars.get(uid_key, []))
+                                st.caption(f"{n_sel} variable(s) selected - they populate `get=` in the query builder below.")
+                                if n_sel and st.button("Clear selected variables", key="step3_clear_vars"):
+                                    st.session_state.step3_selected_vars[uid_key] = []
+                                    st.session_state.step3_query_fields.setdefault(uid_key, {})["get"] = "get="
+                                    st.session_state.step3_vars_grid_gen += 1
+                                    st.rerun()
+                            elif label == "Sample Queries":
+                                url_col = next((c for c in df.columns if c == "in_exampleURL"), None)
+                                uid_key = str(st.session_state.get("selected_ds_unique_id", ""))
+                                last_url = st.session_state.step3_last_example.get(uid_key)
+                                pre = [i for i, u in enumerate(df[url_col]) if str(u) == last_url] if url_col and last_url else []
+                                grid_res = render_grid(
+                                    df,
+                                    key=f"data-grid-step3-{label}",
+                                    selection_mode="single",
+                                    pre_selected_rows=pre,
+                                )
+                                picked = selected_rows_to_list(grid_res.get("selected_rows", None))
+                                if picked and url_col:
+                                    url = str(picked[0].get(url_col, "") or "").strip()
+                                    if url and url != last_url:
+                                        parsed = parse_example_url(url)
+                                        fields = st.session_state.step3_query_fields.setdefault(uid_key, {})
+                                        fields.update({k: v for k, v in parsed.items() if k != "base_url" or v})
+                                        st.session_state.step3_last_example[uid_key] = url
+                                        st.rerun()
+                                st.caption("Select a sample query to fill the base URL, get=, for= and in= fields below.")
+                            else:
+                                render_grid(df, key=f"data-grid-step3-{label}")
 
             if st.button("🔄 Refresh tables from SAS (bypass cache)", key="step3_refresh"):
                 for label, (table, _) in tables.items():
-                    tables[label] = (table, sas_backend.fetch_dataframe(table, STEP3_LIBREF, force_refresh=True))
+                    tables[label] = (table, sas_backend.fetch_dataframe(table, active_lib, force_refresh=True))
                 st.rerun()
 
         st.markdown("---")
