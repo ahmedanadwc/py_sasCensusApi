@@ -1313,11 +1313,15 @@ with card:
 
         with s3_col_l2:
             sas_code_step3_2 = f"""/* Step 3.2: Submit Census Data API Query with Variable Chunking */
+    %If (%sysfunc(exist({p_outDsName})) ne 0) %Then %Do;
+        PROC DELETE DATA={p_outDsName}; RUN;
+    %End;
+
     %censusapi_submitDataApiQuery(
         p_apiBaseURL=%STR({p_apiBaseURL})
     , p_apiGetClause=%STR({p_apiGetClause})
-    , p_apiForClause=%bquote({p_apiForClause})
-    , p_apiInClause=%bquote({p_apiInClause})
+    , p_apiForClause=%NRSTR({p_apiForClause})
+    , p_apiInClause=%NRSTR({p_apiInClause})
     , p_dsUniqueId={p_dsUniqueId}
     , p_outDsName={p_outDsName}
     , p_dataApiKey={p_dataApiKey}
