@@ -139,9 +139,9 @@ if "endpoint_selected" not in st.session_state:
     st.session_state.endpoint_selected = False
 if "sas_connected" not in st.session_state:
     st.session_state.sas_connected = False
-def reject_unsafe_args(**fields) -> bool:
+def reject_unsafe_args(paren_ok: tuple[str, ...] = (), **fields) -> bool:
     """Show an error and return True when a SAS macro argument holds ; % quotes, parens or newlines."""
-    bad = find_unsafe_macro_args(fields)
+    bad = find_unsafe_macro_args(fields, paren_ok)
     if bad:
         st.error("Unsupported characters (; % quotes, parentheses, newlines) in: " + ", ".join(bad))
     return bool(bad)
@@ -1332,6 +1332,7 @@ with card:
                 if not sas_backend.is_connected:
                     st.warning("⚠️ **SAS is not connected.** Return to Step 1 and connect via SASPy first.")
                 elif reject_unsafe_args(
+                    paren_ok=("p_apiForClause", "p_apiInClause"),
                     p_apiBaseURL=p_apiBaseURL, p_apiGetClause=p_apiGetClause,
                     p_apiForClause=p_apiForClause, p_apiInClause=p_apiInClause,
                     p_dsUniqueId=p_dsUniqueId, p_outDsName=p_outDsName, p_dataApiKey=p_dataApiKey,

@@ -20,9 +20,32 @@ _UNSAFE_MACRO_ARG = re.compile(r"[;%()'\"`\r\n]")
 _UNSAFE_PATH = re.compile(r"[;\"\r\n]")
 
 
-def find_unsafe_macro_args(fields: Dict[str, Any]) -> list[str]:
-    """Names of fields whose value could break out of a SAS macro argument (;, %, quotes, parens, newlines)."""
-    return [name for name, value in fields.items() if _UNSAFE_MACRO_ARG.search(str(value))]
+_UNSAFE_NO_PARENS = re.compile(r"[;%'\"`\r\n]")
+
+
+def _balanced_parens(value: str) -> bool:
+    depth = 0
+    for ch in value:
+        depth += (ch == "(") - (ch == ")")
+        if depth < 0:
+            return False
+    return depth == 0
+
+
+def find_unsafe_macro_args(fields: Dict[str, Any], paren_ok: tuple[str, ...] = ()) -> list[str]:
+    """Names of fields whose value could break out of a SAS macro argument (;, %, quotes, parens, newlines).
+
+    Fields named in `paren_ok` (masked with %NRSTR by the caller) may hold balanced parentheses.
+    """
+    bad = []
+    for name, value in fields.items():
+        text = str(value)
+        if name in paren_ok:
+            if _UNSAFE_NO_PARENS.search(text) or not _balanced_parens(text):
+                bad.append(name)
+        elif _UNSAFE_MACRO_ARG.search(text):
+            bad.append(name)
+    return bad
 
 
 def macro_literal(value: str) -> str:
